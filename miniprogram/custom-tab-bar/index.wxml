@@ -1,0 +1,63 @@
+<view class="tab-bar">
+  <view
+    wx:if="{{role === 'GUARD'}}"
+    class="tab-item {{current === 'tasks' ? 'active' : ''}}"
+    hover-class="tab-hover"
+    data-path="/pages/tasks/tasks"
+    bindtap="switchTab"
+  >
+    <view class="icon icon-task">
+      <view class="icon-task-clip"></view>
+      <view class="icon-task-lines">
+        <view class="icon-task-line"></view>
+        <view class="icon-task-line"></view>
+        <view class="icon-task-line short"></view>
+      </view>
+    </view>
+    <view class="tab-label">巡检任务</view>
+  </view>
+
+  <view
+    wx:if="{{role === 'COLLECTOR'}}"
+    class="tab-item {{current === 'collect' ? 'active' : ''}}"
+    hover-class="tab-hover"
+    data-path="/pages/collect/collect"
+    bindtap="switchTab"
+  >
+    <view class="icon icon-collect">
+      <view class="icon-collect-h"></view>
+      <view class="icon-collect-v"></view>
+    </view>
+    <view class="tab-label">设施采集</view>
+  </view>
+
+  <view class="tab-scan" wx:if="{{role !== 'ADMIN'}}" hover-class="none" bindtap="onScan">
+    <view class="scan-btn {{scanning ? 'busy' : ''}}">
+      <view class="scan-frame"></view>
+    </view>
+    <view class="tab-label scan-label">{{role === 'COLLECTOR' ? '扫码采集' : '扫一扫'}}</view>
+  </view>
+
+  <view
+    wx:if="{{role === 'ADMIN'}}"
+    class="tab-item {{current === 'dashboard' ? 'active' : ''}}"
+    hover-class="tab-hover"
+    data-path="/pages/dashboard/dashboard"
+    bindtap="switchTab"
+  >
+    <view class="icon icon-chart">
+      <view class="icon-chart-bar b1"></view>
+      <view class="icon-chart-bar b2"></view>
+      <view class="icon-chart-bar b3"></view>
+    </view>
+    <view class="tab-label">数据看板</view>
+  </view>
+
+  <view class="tab-item {{current === 'me' ? 'active' : ''}}" hover-class="tab-hover" data-path="/pages/me/me" bindtap="switchTab">
+    <view class="icon icon-user">
+      <view class="icon-user-head"></view>
+      <view class="icon-user-body"></view>
+    </view>
+    <view class="tab-label">我的</view>
+  </view>
+</view>

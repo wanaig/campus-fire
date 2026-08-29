@@ -1,0 +1,40 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: campus-fire-mysql
+    restart: unless-stopped
+    # 低内存开发机优化：限制缓冲池并关闭性能采集，内存占用约 150MB
+    command:
+      - --innodb-buffer-pool-size=128M
+      - --performance-schema=OFF
+      - --max-connections=60
+      - --skip-name-resolve
+    environment:
+      MYSQL_DATABASE: campus_fire
+      MYSQL_USER: campus_fire
+      MYSQL_PASSWORD: campus_fire_dev
+      MYSQL_ROOT_PASSWORD: campus_fire_root_dev
+      TZ: Asia/Shanghai
+    ports:
+      - "13306:3306"
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pcampus_fire_root_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: campus-fire-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10

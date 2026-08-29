@@ -1,0 +1,36 @@
+.intro-card {
+  border-left: 8rpx solid #b42318;
+}
+.claim-box {
+  margin: 12rpx 0;
+  padding: 16rpx 20rpx;
+  border-radius: 12rpx;
+  background: #e3f3e9;
+  color: #246b45;
+  font-size: 27rpx;
+  line-height: 1.6;
+}
+.intro-card .muted {
+  line-height: 1.8;
+  margin-top: 8rpx;
+}
+.field-row {
+  display: flex;
+  gap: 18rpx;
+}
+.half { flex: 1; }
+.picker-value { color: #17212b; }
+.readonly {
+  background: #eef1f3;
+  color: #62727d;
+}
+.rule-hint { margin: -4rpx 0 18rpx; padding: 16rpx 18rpx; border-radius: 12rpx; background: #fff7e6; color: #815c00; line-height: 1.6; font-size: 26rpx; }
+.loc-row {
+  display: flex;
+  gap: 16rpx;
+  align-items: center;
+}
+.loc-value { flex: 1; }
+.submit-btn {
+  margin-top: 16rpx;
+}

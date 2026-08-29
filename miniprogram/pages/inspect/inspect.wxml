@@ -1,0 +1,73 @@
+<view class="page {{largeText ? 'page-large' : ''}}">
+  <view class="card head-card">
+    <view class="card-title">{{facilityName}}</view>
+    <view class="muted">编号：{{facilityNo}}</view>
+    <view class="muted">位置：{{locationText}}</view>
+    <view class="verification-row">
+      <text class="verification-ok">✓ 有效二维码</text>
+      <text class="verification-ok">✓ 定位通过</text>
+      <text class="verification-ok">✓ 服务器计时</text>
+    </view>
+    <view wx:if="{{offlineDraft}}" class="offline-hint">当前为本地草稿，尚未上传服务器；网络恢复后请点击“补传草稿”。</view>
+  </view>
+
+  <view wx:if="{{loading}}" class="empty">正在加载检查项…</view>
+  <view wx:elif="{{error}}" class="empty">
+    <view>{{error}}</view>
+    <button class="btn-ghost retry-btn" bindtap="load">重新加载</button>
+  </view>
+
+  <block wx:else>
+    <view class="section-head">
+      <view>
+        <view class="section-title">{{inspectionTitle}}</view>
+        <view class="muted">参照纸质巡检表逐项检查</view>
+      </view>
+      <view class="progress-count">{{completedCount}} / {{items.length}}</view>
+    </view>
+    <view wx:for="{{items}}" wx:key="id" class="card check-card">
+      <view class="row check-head">
+        <view class="check-name">{{item.item_name}}</view>
+        <text wx:if="{{item.required_flag}}" class="required-mark">必检</text>
+      </view>
+      <view class="choice-row">
+        <view
+          class="choice {{results[item.item_code] === 'PASS' ? 'choice-pass' : ''}}"
+          data-code="{{item.item_code}}"
+          data-value="PASS"
+          bindtap="setResult"
+        >✓ 正常</view>
+        <view
+          class="choice {{results[item.item_code] === 'FAIL' ? 'choice-fail' : ''}}"
+          data-code="{{item.item_code}}"
+          data-value="FAIL"
+          bindtap="setResult"
+        >× 异常</view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">现场照片（必拍）</view>
+      <view class="muted photo-hint">只能现场调用摄像头拍摄，禁止从相册选择{{prompts.length ? '。建议拍摄：' + prompts.join('、') : ''}}</view>
+      <view class="photo-grid">
+        <view wx:for="{{photos}}" wx:key="photoId" class="photo-cell">
+          <image src="{{item.path}}" mode="aspectFill" class="photo-img" />
+          <view class="photo-del" data-index="{{index}}" catchtap="removePhoto">删除</view>
+        </view>
+        <view wx:if="{{photos.length < 3}}" class="photo-add" bindtap="takePhoto">＋ 拍照</view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">备注说明</view>
+      <view class="muted photo-hint">发现异常时必须填写异常情况（如压力不足、箱门破损等）</view>
+      <textarea class="field-textarea" value="{{note}}" bindinput="onNote" placeholder="填写巡检备注或异常说明" placeholder-class="ph" maxlength="500" />
+    </view>
+
+    <view class="action-bar">
+      <button class="btn-ghost action-draft" loading="{{savingDraft}}" bindtap="onSaveDraft">保存草稿</button>
+      <button wx:if="{{offlineDraft}}" class="btn-ghost action-draft" loading="{{uploadingDraft}}" bindtap="retryDraft">补传草稿</button>
+      <button class="btn-primary action-submit" loading="{{submitting}}" bindtap="onSubmit">提交巡检</button>
+    </view>
+  </block>
+</view>

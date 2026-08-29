@@ -1,0 +1,39 @@
+{
+  "pages": [
+    "pages/tasks/tasks",
+    "pages/login/login",
+    "pages/inspect/inspect",
+    "pages/collect/collect",
+    "pages/collect-form/collect-form",
+    "pages/dashboard/dashboard",
+    "pages/me/me"
+  ],
+  "window": {
+    "navigationBarBackgroundColor": "#b42318",
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "消防巡检",
+    "backgroundColor": "#f4f6f8",
+    "backgroundTextStyle": "dark"
+  },
+  "tabBar": {
+    "custom": true,
+    "color": "#62727d",
+    "selectedColor": "#b42318",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "black",
+    "list": [
+      { "pagePath": "pages/tasks/tasks", "text": "巡检任务" },
+      { "pagePath": "pages/collect/collect", "text": "设施采集" },
+      { "pagePath": "pages/dashboard/dashboard", "text": "数据看板" },
+      { "pagePath": "pages/me/me", "text": "我的" }
+    ]
+  },
+  "permission": {
+    "scope.userLocation": {
+      "desc": "巡检时校验您是否位于消防设施附近，位置信息将随巡检记录留痕"
+    }
+  },
+  "requiredPrivateInfos": ["getLocation"],
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

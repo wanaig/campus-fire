@@ -1,0 +1,34 @@
+<view class="page {{largeText ? 'page-large' : ''}}">
+  <view class="card user-card">
+    <view class="avatar">{{user.displayName ? user.displayName[0] : '消'}}</view>
+    <view class="user-info">
+      <view class="card-title">{{user.displayName || user.username}}</view>
+      <view class="muted">{{user.username}} · {{user.roleCode === 'ADMIN' ? '系统管理员' : user.roleCode === 'GUARD' ? '保安' : '数据采集员'}}</view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="setting-row">
+      <view>
+        <view class="setting-name">大字号模式</view>
+        <view class="muted">放大页面文字，方便查看</view>
+      </view>
+      <switch checked="{{largeText}}" bindchange="toggleLargeText" color="#b42318" />
+    </view>
+    <view class="setting-row">
+      <view>
+        <view class="setting-name">演示模式</view>
+        <view class="muted">定位校验放宽到10公里，便于没有真实设施坐标时体验全流程</view>
+      </view>
+      <switch checked="{{demoMode}}" bindchange="toggleDemoMode" color="#b42318" />
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="setting-name">服务器地址</view>
+    <view class="muted server-value">{{baseUrl}}</view>
+    <view class="muted">真机使用时请修改 miniprogram/utils/config.js 为电脑局域网地址</view>
+  </view>
+
+  <button class="btn-ghost logout-btn" bindtap="logout">退出登录</button>
+</view>

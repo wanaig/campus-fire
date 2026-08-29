@@ -1,0 +1,91 @@
+<view class="page {{largeText ? 'page-large' : ''}}">
+  <view class="card intro-card">
+    <view wx:if="{{editingId}}">
+      <view class="card-title">编辑设施档案（{{editingNo}}）</view>
+      <view class="muted">已载入该设施的现有档案，请现场核对并补全信息，保存后立即生效。</view>
+    </view>
+    <view wx:else>
+      <view class="card-title">新建设施档案</view>
+      <view wx:if="{{claimToken}}" class="claim-box">已扫描空白设施码 NO.{{claimSerial}}，保存档案后将自动绑定该二维码</view>
+      <view class="muted">请录入该设备的设施信息和安装位置。保存后此设备上的二维码立即生效，可用于保安扫码巡检。</view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="field">
+      <text class="field-label">设施类型 *</text>
+      <picker mode="selector" range="{{types}}" range-key="typeName" value="{{typeIndex}}" bindchange="onTypeChange">
+        <view class="field-input picker-value">
+          {{typeIndex >= 0 ? types[typeIndex].typeName : '点击选择设施类型'}}
+        </view>
+      </picker>
+    </view>
+    <view class="field" wx:if="{{!editingId}}">
+      <text class="field-label">设施编号 *</text>
+      <input class="field-input" value="{{form.facilityNo}}" data-field="facilityNo" bindinput="onInput" placeholder="例如 XF-EXT-010" placeholder-class="ph" />
+    </view>
+    <view class="field" wx:else>
+      <text class="field-label">设施编号（不可修改）</text>
+      <view class="field-input readonly">{{form.facilityNo}}</view>
+    </view>
+    <view class="field">
+      <text class="field-label">设施名称 *</text>
+      <input class="field-input" value="{{form.name}}" data-field="name" bindinput="onInput" placeholder="例如 2号教学楼灭火器" placeholder-class="ph" />
+    </view>
+    <view class="field-row">
+      <view class="field half">
+        <text class="field-label">校区 *</text>
+        <input class="field-input" value="{{form.campus}}" data-field="campus" bindinput="onInput" placeholder="主校区" placeholder-class="ph" />
+      </view>
+      <view class="field half">
+        <text class="field-label">楼栋 *</text>
+        <input class="field-input" value="{{form.building}}" data-field="building" bindinput="onInput" placeholder="例如 2号教学楼" placeholder-class="ph" />
+      </view>
+    </view>
+    <view class="field-row">
+      <view class="field half">
+        <text class="field-label">楼层 *</text>
+        <input class="field-input" value="{{form.floor}}" data-field="floor" bindinput="onInput" placeholder="例如 1层" placeholder-class="ph" />
+      </view>
+      <view class="field half">
+        <text class="field-label">区域 *</text>
+        <input class="field-input" value="{{form.area}}" data-field="area" bindinput="onInput" placeholder="例如 东侧走廊" placeholder-class="ph" />
+      </view>
+    </view>
+    <view class="field">
+      <text class="field-label">详细位置 *</text>
+      <input class="field-input" value="{{form.detailLocation}}" data-field="detailLocation" bindinput="onInput" placeholder="例如 消防栓旁立柱" placeholder-class="ph" />
+    </view>
+    <view class="field-row">
+      <view class="field half">
+        <text class="field-label">品牌</text>
+        <input class="field-input" value="{{form.brand}}" data-field="brand" bindinput="onInput" placeholder="选填" placeholder-class="ph" />
+      </view>
+      <view class="field half">
+        <text class="field-label">型号</text>
+        <input class="field-input" value="{{form.model}}" data-field="model" bindinput="onInput" placeholder="选填" placeholder-class="ph" />
+      </view>
+    </view>
+    <view class="field">
+      <text class="field-label">规格</text>
+      <input class="field-input" value="{{form.specification}}" data-field="specification" bindinput="onInput" placeholder="选填，例如 4kg 干粉" placeholder-class="ph" />
+    </view>
+    <view class="field-row">
+      <view class="field half"><text class="field-label">生产日期</text><picker mode="date" value="{{form.manufactureDate}}" bindchange="onManufactureDateChange"><view class="field-input picker-value">{{form.manufactureDate || '选填'}}</view></picker></view>
+      <view class="field half"><text class="field-label">投用日期</text><picker mode="date" value="{{form.commissionedDate}}" bindchange="onCommissionedDateChange"><view class="field-input picker-value">{{form.commissionedDate || '选填'}}</view></picker></view>
+    </view>
+    <view wx:if="{{ruleHint}}" class="rule-hint">{{ruleHint}}</view>
+    <view class="field">
+      <text class="field-label">安装位置坐标 *</text>
+      <view class="loc-row">
+        <view class="field-input loc-value">
+          {{form.latitude ? form.latitude + ' , ' + form.longitude : '未采集'}}
+        </view>
+        <button class="btn-mini" bindtap="captureLocation">采集当前位置</button>
+      </view>
+      <view class="muted">请站在设施旁边点击采集，坐标用于巡检定位校验</view>
+    </view>
+  </view>
+
+  <button class="btn-primary submit-btn" loading="{{submitting}}" bindtap="submit">{{editingId ? '保存档案更新' : '保存设施档案'}}</button>
+</view>

@@ -1,0 +1,22 @@
+CREATE TABLE rectification_order (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    record_id VARCHAR(36) NOT NULL,
+    task_id BIGINT NOT NULL,
+    facility_id BIGINT NOT NULL,
+    issue_summary VARCHAR(2000) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'OPEN',
+    due_date DATE NULL,
+    resolution_note VARCHAR(2000) NULL,
+    resolved_at DATETIME NULL,
+    resolved_by BIGINT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_rectification_record (record_id),
+    KEY idx_rectification_status (status),
+    KEY idx_rectification_facility (facility_id),
+    CONSTRAINT fk_rectification_record FOREIGN KEY (record_id) REFERENCES inspection_record(id),
+    CONSTRAINT fk_rectification_task FOREIGN KEY (task_id) REFERENCES inspection_task(id),
+    CONSTRAINT fk_rectification_facility FOREIGN KEY (facility_id) REFERENCES facility(id),
+    CONSTRAINT fk_rectification_resolver FOREIGN KEY (resolved_by) REFERENCES app_user(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消防设施异常整改单';

@@ -1,0 +1,71 @@
+.page-head {
+  margin-bottom: 24rpx;
+}
+.hello {
+  font-size: 42rpx;
+  font-weight: 700;
+}
+.page-large .hello { font-size: 50rpx; }
+.task-name {
+  flex: 1;
+  margin-right: 12rpx;
+}
+.due-row {
+  margin-top: 16rpx;
+}
+.overdue {
+  color: #b42318;
+  font-weight: 600;
+}
+.page {
+  padding-bottom: calc(240rpx + env(safe-area-inset-bottom));
+}
+.rect-block {
+  margin-top: 18rpx;
+  border-top: 2rpx solid #eef1f3;
+  padding-top: 16rpx;
+}
+.rect-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+.rect-toggle-hint {
+  font-size: 24rpx;
+  color: #7b8992;
+}
+.rect-list {
+  margin-top: 14rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+}
+.rect-item {
+  background: #f8f9fa;
+  border-radius: 10rpx;
+  padding: 16rpx 18rpx;
+}
+.rect-item-head {
+  margin-bottom: 8rpx;
+}
+.rect-issue {
+  font-size: 27rpx;
+  color: #b42318;
+  line-height: 1.5;
+  word-break: break-all;
+}
+.page-large .rect-issue { font-size: 33rpx; }
+.rect-issue-done {
+  color: #45545e;
+}
+.rect-note {
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: #7b8992;
+  word-break: break-all;
+}
+.retry-btn {
+  margin-top: 24rpx;
+  padding: 12rpx 40rpx;
+}

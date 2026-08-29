@@ -1,0 +1,68 @@
+<view class="page {{largeText ? 'page-large' : ''}}">
+  <view class="page-head">
+    <view>
+      <view class="hello">{{items.length ? '今日待办巡检' : '巡检任务'}}</view>
+      <view class="muted">{{today}} · 共 {{items.length}} 项</view>
+    </view>
+  </view>
+  <view class="chips">
+    <view
+      wx:for="{{filters}}"
+      wx:key="key"
+      class="chip {{active === item.key ? 'active' : ''}}"
+      data-key="{{item.key}}"
+      bindtap="switchFilter"
+    >{{item.label}}</view>
+  </view>
+
+  <view wx:if="{{loading}}" class="empty">正在加载任务…</view>
+  <view wx:elif="{{error}}" class="empty">
+    <view class="empty-icon">!</view>
+    <view>{{error}}</view>
+    <button class="btn-ghost retry-btn" bindtap="load">重新加载</button>
+  </view>
+  <view wx:elif="{{!items.length}}" class="empty">
+    <view class="empty-icon">✓</view>
+    <view>当前没有巡检任务</view>
+  </view>
+
+  <view wx:for="{{items}}" wx:key="id" class="card task-card">
+    <view class="row">
+      <view class="card-title task-name">{{item.name}}</view>
+      <view class="badge {{item.status === 'COMPLETED' ? 'ok' : item.status === 'IN_PROGRESS' ? 'info' : 'warn'}}">
+        {{item.status === 'PENDING' ? '待巡检' : item.status === 'IN_PROGRESS' ? '巡检中' : '已完成'}}
+      </view>
+    </view>
+    <view class="muted">编号：{{item.facility_no}}</view>
+    <view class="muted">位置：{{item.campus}} / {{item.building}} / {{item.floor}} / {{item.area}}</view>
+    <view class="row due-row">
+      <view class="muted {{item.status !== 'COMPLETED' && item.due_date < today ? 'overdue' : ''}}">
+        截止：{{item.due_date}}{{item.status !== 'COMPLETED' && item.due_date < today ? '（已逾期）' : ''}}
+      </view>
+      <button
+        wx:if="{{item.status !== 'COMPLETED'}}"
+        class="btn-mini"
+        data-index="{{index}}"
+        bindtap="startInspection"
+      >{{item.status === 'IN_PROGRESS' ? '继续巡检' : '扫码巡检'}}</button>
+    </view>
+    <view wx:if="{{item.rectCount}}" class="rect-block">
+      <view class="rect-toggle" data-index="{{index}}" catchtap="toggleRect">
+        <view class="badge {{item.rectOpenCount ? 'danger' : 'ok'}}">
+          {{item.rectOpenCount ? '待整改 ' + item.rectOpenCount + ' 项' : '整改完成 ' + item.rectCount + ' 项'}}
+        </view>
+        <view class="rect-toggle-hint">{{item.rectExpanded ? '收起' : '整改详情'}}</view>
+      </view>
+      <view wx:if="{{item.rectExpanded}}" class="rect-list">
+        <view wx:for="{{item.rectifications}}" wx:for-item="rect" wx:key="id" class="rect-item">
+          <view class="row rect-item-head">
+            <view class="badge {{rect.status === 'RESOLVED' ? 'ok' : 'danger'}}">{{rect.status === 'RESOLVED' ? '已整改' : '待整改'}}</view>
+            <view class="muted">整改期限：{{rect.due_date || '未设置'}}</view>
+          </view>
+          <view class="rect-issue {{rect.status === 'RESOLVED' ? 'rect-issue-done' : ''}}">{{rect.issue_summary}}</view>
+          <view wx:if="{{rect.status === 'RESOLVED' && rect.resolution_note}}" class="rect-note">整改结果：{{rect.resolution_note}}</view>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

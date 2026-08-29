@@ -1,0 +1,102 @@
+.head-card {
+  border-left: 8rpx solid #b42318;
+}
+.verification-row { display: flex; flex-wrap: wrap; gap: 10rpx; margin-top: 16rpx; }
+.verification-ok { padding: 7rpx 12rpx; border-radius: 8rpx; background: #e3f3e9; color: #246b45; font-size: 23rpx; }
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 20rpx; margin: 30rpx 4rpx 18rpx; }
+.section-title { font-size: 34rpx; font-weight: 700; }
+.progress-count { flex: none; min-width: 104rpx; padding: 10rpx 14rpx; border-radius: 10rpx; background: #17212b; color: #fff; font-size: 25rpx; text-align: center; }
+.offline-hint { margin-top: 14rpx; padding: 14rpx 16rpx; border-radius: 10rpx; background: #fff2d6; color: #815c00; line-height: 1.6; }
+.check-head {
+  margin-bottom: 18rpx;
+}
+.check-name {
+  font-size: 31rpx;
+  font-weight: 600;
+  flex: 1;
+}
+.page-large .check-name { font-size: 37rpx; }
+.required-mark {
+  font-size: 22rpx;
+  color: #b42318;
+  border: 2rpx solid #b42318;
+  border-radius: 8rpx;
+  padding: 2rpx 12rpx;
+}
+.choice-row {
+  display: flex;
+  gap: 18rpx;
+}
+.choice {
+  flex: 1;
+  text-align: center;
+  padding: 18rpx 0;
+  border-radius: 12rpx;
+  background: #f4f6f8;
+  color: #45545e;
+  font-size: 30rpx;
+}
+.page-large .choice { font-size: 36rpx; }
+.choice-pass {
+  background: #e3f3e9;
+  color: #246b45;
+  font-weight: 700;
+}
+.choice-fail {
+  background: #fdece9;
+  color: #b42318;
+  font-weight: 700;
+}
+.photo-hint {
+  margin-bottom: 18rpx;
+  line-height: 1.7;
+}
+.photo-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+}
+.photo-cell {
+  position: relative;
+  width: 200rpx;
+  height: 200rpx;
+}
+.photo-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 12rpx;
+}
+.photo-del {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(20, 35, 45, 0.65);
+  color: #ffffff;
+  font-size: 22rpx;
+  text-align: center;
+  border-radius: 0 0 12rpx 12rpx;
+  padding: 6rpx 0;
+}
+.photo-add {
+  width: 200rpx;
+  height: 200rpx;
+  border: 2rpx dashed #b42318;
+  border-radius: 12rpx;
+  color: #b42318;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28rpx;
+}
+.retry-btn {
+  margin-top: 24rpx;
+  padding: 12rpx 40rpx;
+}
+.action-bar {
+  display: flex;
+  gap: 18rpx;
+  margin-top: 10rpx;
+}
+.action-draft { flex: 1; }
+.action-submit { flex: 2; }

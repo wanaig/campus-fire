@@ -1,0 +1,4 @@
+{
+  "desc": "校园消防设施巡检系统",
+  "rules": [{ "action": "allow", "page": "*" }]
+}

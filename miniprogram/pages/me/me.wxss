@@ -1,0 +1,46 @@
+.page {
+  padding-bottom: calc(240rpx + env(safe-area-inset-bottom));
+}
+.user-card {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+  margin-bottom: 24rpx;
+}
+.avatar {
+  width: 100rpx;
+  height: 100rpx;
+  border-radius: 50%;
+  background: #b42318;
+  color: #ffffff;
+  font-size: 44rpx;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.setting-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24rpx;
+  padding: 18rpx 0;
+}
+.setting-name {
+  font-size: 31rpx;
+  font-weight: 600;
+  margin-bottom: 6rpx;
+}
+.page-large .setting-name { font-size: 37rpx; }
+.entry-card {
+  border-left: 8rpx solid #b42318;
+}
+.server-value {
+  margin: 8rpx 0;
+  word-break: break-all;
+  color: #45545e;
+}
+.logout-btn {
+  margin-top: 30rpx;
+}

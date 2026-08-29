@@ -1,0 +1,38 @@
+.login-page {
+  padding-top: 100rpx;
+}
+.login-hero {
+  text-align: center;
+  margin-bottom: 60rpx;
+}
+.login-mark {
+  width: 120rpx;
+  height: 120rpx;
+  margin: 0 auto 24rpx;
+  border-radius: 28rpx;
+  background: #b42318;
+  color: #ffffff;
+  font-size: 60rpx;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.login-title {
+  font-size: 44rpx;
+  font-weight: 700;
+}
+.login-sub {
+  color: #7b8992;
+  font-size: 26rpx;
+  margin-top: 12rpx;
+}
+.login-card {
+  padding: 40rpx 32rpx;
+}
+.login-tip {
+  margin-top: 24rpx;
+  line-height: 1.7;
+  text-align: center;
+}
+.ph { color: #a6b1b8; }

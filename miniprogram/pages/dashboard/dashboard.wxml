@@ -1,0 +1,90 @@
+<view class="page {{largeText ? 'page-large' : ''}}">
+  <view class="page-head">
+    <view>
+      <view class="hello">数据看板</view>
+      <view class="muted">{{generatedAt ? '统计截至 ' + generatedAt : '全校消防设施总体状态'}}</view>
+    </view>
+  </view>
+  <view class="chips">
+    <view
+      wx:for="{{trendFilters}}"
+      wx:key="key"
+      class="chip {{trendDays === item.key ? 'active' : ''}}"
+      data-key="{{item.key}}"
+      bindtap="switchTrend"
+    >{{item.label}}</view>
+  </view>
+
+  <view wx:if="{{loading}}" class="empty">正在加载…</view>
+  <view wx:elif="{{error}}" class="empty">
+    <view class="empty-icon">!</view>
+    <view>{{error}}</view>
+    <button class="btn-ghost retry-btn" bindtap="load">重新加载</button>
+  </view>
+
+  <block wx:else>
+    <view class="stat-grid">
+      <view class="card stat-card">
+        <view class="stat-value">{{stats.facilityTotal}}</view>
+        <view class="stat-label">设施总数</view>
+      </view>
+      <view class="card stat-card">
+        <view class="stat-value">{{stats.pending}}</view>
+        <view class="stat-label">待巡检任务</view>
+      </view>
+      <view class="card stat-card {{stats.overdue ? 'stat-danger' : ''}}">
+        <view class="stat-value">{{stats.overdue}}</view>
+        <view class="stat-label">逾期任务</view>
+      </view>
+      <view class="card stat-card {{stats.openRect ? 'stat-danger' : ''}}">
+        <view class="stat-value">{{stats.openRect}}</view>
+        <view class="stat-label">待整改</view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">巡检提交趋势</view>
+      <view wx:if="{{!trendBars.length}}" class="muted">该时段内暂无巡检提交记录</view>
+      <view wx:else class="trend-chart">
+        <view wx:for="{{trendBars}}" wx:key="date" class="trend-col" title="{{item.date}}：{{item.count}} 次">
+          <view class="trend-bar" style="height: {{item.height}}%"></view>
+        </view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">任务状态分布</view>
+      <view wx:for="{{taskRows}}" wx:key="status" class="dist-row">
+        <view class="badge {{item.status === 'COMPLETED' ? 'ok' : item.status === 'IN_PROGRESS' ? 'info' : 'warn'}}">{{item.label}}</view>
+        <view class="dist-count">{{item.count}}</view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">整改态势</view>
+      <view wx:for="{{rectRows}}" wx:key="status" class="dist-row">
+        <view class="badge {{item.status === 'RESOLVED' ? 'ok' : 'danger'}}">{{item.label}}</view>
+        <view class="dist-count">{{item.count}}</view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">设施类型分布</view>
+      <view wx:if="{{!facilityRows.length}}" class="muted">暂无设施数据</view>
+      <view wx:for="{{facilityRows}}" wx:key="facilityType" class="dist-row">
+        <view class="type-name">{{item.facilityTypeName}}</view>
+        <view class="muted">共 {{item.totalCount}} · 在用 {{item.inUseCount}}</view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">30天内保养到期（{{maintenanceDue.length}}）</view>
+      <view wx:if="{{!maintenanceDue.length}}" class="muted">近期没有需要保养的设施</view>
+      <view wx:for="{{maintenanceDue}}" wx:key="id" class="maint-item">
+        <view class="maint-name">{{item.name}}</view>
+        <view class="muted">{{item.facility_no}} · {{item.campus}} / {{item.building}} / {{item.floor}}</view>
+        <view class="badge warn maint-date">保养：{{item.next_maintenance_at}}</view>
+      </view>
+    </view>
+  </block>
+</view>

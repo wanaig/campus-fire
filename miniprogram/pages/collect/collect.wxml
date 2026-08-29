@@ -1,0 +1,40 @@
+<view class="page {{largeText ? 'page-large' : ''}}">
+  <view class="page-head">
+    <view class="hello">设施采集</view>
+    <view class="muted">已采集 {{items.length}} 项 · 在用 {{inUseCount}} 项</view>
+    <view class="muted head-hint">新设备建档：点底部「扫码采集」扫描贴在设备上的空白码</view>
+  </view>
+
+  <view wx:if="{{loading}}" class="empty">正在加载设施…</view>
+  <view wx:elif="{{error}}" class="empty">
+    <view class="empty-icon">!</view>
+    <view>{{error}}</view>
+    <button class="btn-ghost retry-btn" bindtap="load">重新加载</button>
+  </view>
+  <view wx:elif="{{!items.length}}" class="empty">
+    <view class="empty-icon">✓</view>
+    <view>还没有设施档案</view>
+    <view class="muted empty-hint">点击底部「扫码采集」扫描贴在设备上的空白码，开始第一件建档</view>
+  </view>
+
+  <view
+    wx:for="{{items}}"
+    wx:key="id"
+    class="card facility-card"
+    data-index="{{index}}"
+    bindtap="onEditCard"
+  >
+    <view class="row">
+      <view class="card-title facility-name">{{item.name}}</view>
+      <view class="badge {{item.lifecycleBadge}}">{{item.lifecycleLabel}}</view>
+    </view>
+    <view class="muted">编号：{{item.facilityNo}}</view>
+    <view class="muted">类型：{{item.typeName}}</view>
+    <view class="muted">位置：{{item.locationText}}</view>
+    <view wx:if="{{item.brand || item.model}}" class="muted">品牌：{{item.brand || '—'}} / {{item.model || '—'}}</view>
+    <view class="row due-row">
+      <view class="muted">下次保养：{{item.maintenanceText || '未排期'}}</view>
+      <button class="btn-mini" catchtap="onEditCard" data-index="{{index}}">修改档案</button>
+    </view>
+  </view>
+</view>

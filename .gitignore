@@ -1,0 +1,24 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Java
+backend/target/
+*.log
+
+# Node
+node_modules/
+dist/
+
+# Environment and local data
+.env
+deploy/data/
+data/
+uploads/
+output/
+tmp/
+
+# Operating systems
+.DS_Store
+Thumbs.db

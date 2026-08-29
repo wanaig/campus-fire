@@ -1,0 +1,31 @@
+.page {
+  padding-bottom: calc(240rpx + env(safe-area-inset-bottom));
+}
+.page-head {
+  margin-bottom: 24rpx;
+}
+.hello {
+  font-size: 42rpx;
+  font-weight: 700;
+}
+.page-large .hello { font-size: 50rpx; }
+.head-hint {
+  margin-top: 6rpx;
+}
+.facility-card {
+  position: relative;
+}
+.facility-name {
+  flex: 1;
+  margin-right: 12rpx;
+}
+.due-row {
+  margin-top: 16rpx;
+}
+.retry-btn {
+  margin-top: 24rpx;
+  padding: 12rpx 40rpx;
+}
+.empty-hint {
+  margin-top: 10rpx;
+}
