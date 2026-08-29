@@ -1,13 +1,21 @@
 <view class="page {{largeText ? 'page-large' : ''}}">
   <view class="card intro-card">
+    <view class="auto-name">
+      <view class="auto-name-label">设施名称（按位置自动拼接，无需填写）</view>
+      <view class="auto-name-value {{form.name ? '' : 'auto-name-empty'}}">{{form.name || '填写下方校区、楼栋、楼层、区域、详细位置后自动生成'}}</view>
+    </view>
     <view wx:if="{{editingId}}">
       <view class="card-title">编辑设施档案（{{editingNo}}）</view>
       <view class="muted">已载入该设施的现有档案，请现场核对并补全信息，保存后立即生效。</view>
     </view>
     <view wx:else>
       <view class="card-title">新建设施档案</view>
-      <view wx:if="{{claimToken}}" class="claim-box">已扫描空白设施码 NO.{{claimSerial}}，保存档案后将自动绑定该二维码</view>
-      <view class="muted">请录入该设备的设施信息和安装位置。保存后此设备上的二维码立即生效，可用于保安扫码巡检。</view>
+      <view wx:if="{{claimToken}}" class="claim-box">
+        <view>已扫描空白设施码 {{claimLabel || 'NO.' + claimSerial}}</view>
+        <view wx:if="{{labelLocked}}" class="claim-loc">标签位置：{{form.campus}} / {{form.building}} / {{form.floor}}{{claimLocation.locationLabel ? ' / ' + claimLocation.locationLabel : ''}}（自动带入）</view>
+        <view>保存档案后将自动绑定该二维码</view>
+      </view>
+      <view class="muted">设施编号由系统自动生成、设施名称按位置自动拼接，均无需填写。请对照现场勾选该位置包含的部件并补全生产日期。保存后此设备上的二维码立即生效，可用于保安扫码巡检。</view>
     </view>
   </view>
 
@@ -20,32 +28,40 @@
         </view>
       </picker>
     </view>
-    <view class="field" wx:if="{{!editingId}}">
-      <text class="field-label">设施编号 *</text>
-      <input class="field-input" value="{{form.facilityNo}}" data-field="facilityNo" bindinput="onInput" placeholder="例如 XF-EXT-010" placeholder-class="ph" />
-    </view>
-    <view class="field" wx:else>
-      <text class="field-label">设施编号（不可修改）</text>
-      <view class="field-input readonly">{{form.facilityNo}}</view>
+    <view class="field component-section" wx:if="{{componentList.length}}">
+      <text class="field-label">该位置包含部件（勾选并填写生产日期）*</text>
+      <view wx:for="{{componentList}}" wx:key="itemCode" class="component-row">
+        <view class="component-head" data-code="{{item.itemCode}}" bindtap="onComponentToggle">
+          <view class="component-check {{item.checked ? 'checked' : ''}}">{{item.checked ? '✓' : ''}}</view>
+          <view class="component-name">{{item.itemName}}</view>
+        </view>
+        <picker mode="date" value="{{item.manufactureDate}}" disabled="{{!item.checked}}" data-code="{{item.itemCode}}" bindchange="onComponentDateChange">
+          <view class="component-date {{item.checked ? (item.manufactureDate ? '' : 'component-date-empty') : 'component-date-disabled'}}">生产日期：{{item.checked ? (item.manufactureDate || '请选择') : '未勾选'}}</view>
+        </picker>
+      </view>
+      <view class="muted component-hint">对照现场实际配备勾选，未配备的部件请取消勾选</view>
     </view>
     <view class="field">
-      <text class="field-label">设施名称 *</text>
-      <input class="field-input" value="{{form.name}}" data-field="name" bindinput="onInput" placeholder="例如 2号教学楼灭火器" placeholder-class="ph" />
+      <text class="field-label">设施编号（系统自动生成，不可修改）</text>
+      <view class="field-input readonly">{{editingId ? form.facilityNo : (claimLabel || '保存后由系统生成唯一编号')}}</view>
     </view>
     <view class="field-row">
       <view class="field half">
         <text class="field-label">校区 *</text>
-        <input class="field-input" value="{{form.campus}}" data-field="campus" bindinput="onInput" placeholder="主校区" placeholder-class="ph" />
+        <view wx:if="{{labelLocked}}" class="field-input readonly">{{form.campus}}</view>
+        <input wx:else class="field-input" value="{{form.campus}}" data-field="campus" bindinput="onInput" placeholder="主校区" placeholder-class="ph" />
       </view>
       <view class="field half">
         <text class="field-label">楼栋 *</text>
-        <input class="field-input" value="{{form.building}}" data-field="building" bindinput="onInput" placeholder="例如 2号教学楼" placeholder-class="ph" />
+        <view wx:if="{{labelLocked}}" class="field-input readonly">{{form.building}}</view>
+        <input wx:else class="field-input" value="{{form.building}}" data-field="building" bindinput="onInput" placeholder="例如 2号教学楼" placeholder-class="ph" />
       </view>
     </view>
     <view class="field-row">
       <view class="field half">
         <text class="field-label">楼层 *</text>
-        <input class="field-input" value="{{form.floor}}" data-field="floor" bindinput="onInput" placeholder="例如 1层" placeholder-class="ph" />
+        <view wx:if="{{labelLocked}}" class="field-input readonly">{{form.floor}}</view>
+        <input wx:else class="field-input" value="{{form.floor}}" data-field="floor" bindinput="onInput" placeholder="例如 1层" placeholder-class="ph" />
       </view>
       <view class="field half">
         <text class="field-label">区域 *</text>

@@ -91,7 +91,7 @@ Write-Host @"
   管理后台      http://127.0.0.1:5173
   后端接口      http://localhost:8080/api
 
-  管理员账号    admin / Admin@123
+  管理员账号    admin / 123456
   保安（演示）  guard / Guard@123
   采集员（演示） collector / Collect@123
 

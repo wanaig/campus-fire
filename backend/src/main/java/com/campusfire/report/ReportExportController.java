@@ -15,11 +15,11 @@ public class ReportExportController {
     @GetMapping("/inspection-records.csv")
     public ResponseEntity<byte[]> inspectionRecords(Authentication authentication){
         AuthenticatedUser user=requireAdmin(authentication); auditService.record(user.getId(),"REPORT_EXPORT","INSPECTION_RECORD",null,Collections.singletonMap("format","csv"));
-        List<Map<String,Object>> rows=jdbcTemplate.queryForList("SELECT f.facility_no,f.name,f.campus,f.building,f.floor,f.area,f.facility_type_id,u.display_name AS inspector,r.submitted_at,r.photo_count,r.note,r.results_json FROM inspection_record r JOIN inspection_task t ON t.id=r.task_id JOIN facility f ON f.id=t.facility_id JOIN app_user u ON u.id=r.user_id LEFT JOIN inspection_record_correction c ON c.record_id=r.id WHERE c.id IS NULL ORDER BY r.submitted_at DESC");
-        Map<Long,java.util.LinkedHashMap<String,String>> typeLabels=resultSupport.loadItemLabels();
+        List<Map<String,Object>> rows=jdbcTemplate.queryForList("SELECT f.facility_no,f.name,f.campus,f.building,f.floor,f.area,f.id AS facility_id,u.display_name AS inspector,r.submitted_at,r.photo_count,r.note,r.results_json FROM inspection_record r JOIN inspection_task t ON t.id=r.task_id JOIN facility f ON f.id=t.facility_id JOIN app_user u ON u.id=r.user_id LEFT JOIN inspection_record_correction c ON c.record_id=r.id WHERE c.id IS NULL ORDER BY r.submitted_at DESC");
+        java.util.Map<Long,java.util.LinkedHashMap<String,String>> facilityLabels=resultSupport.loadFacilityLabels(rows.stream().map(r->((Number)r.get("facility_id")).longValue()).collect(java.util.stream.Collectors.toSet()));
         StringBuilder csv=new StringBuilder("设施编号,设施名称,校区,楼栋,楼层,区域,巡检人员,提交时间,检查结果,照片数量,备注\r\n");
         for(Map<String,Object> row:rows){
-            java.util.LinkedHashMap<String,String> labels=typeLabels.getOrDefault((Long)row.get("facility_type_id"),new java.util.LinkedHashMap<>());
+            java.util.LinkedHashMap<String,String> labels=facilityLabels.getOrDefault(((Number)row.get("facility_id")).longValue(),new java.util.LinkedHashMap<>());
             csv.append(String.join(",",Arrays.asList(row.get("facility_no"),row.get("name"),row.get("campus"),row.get("building"),row.get("floor"),row.get("area"),row.get("inspector"),row.get("submitted_at"),resultSummary(row.get("results_json"),labels),row.get("photo_count"),row.get("note")).stream().map(v->escape(v==null?"":String.valueOf(v))).collect(java.util.stream.Collectors.toList()))).append("\r\n");}
         return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=inspection-records.csv").contentType(MediaType.parseMediaType("text/csv;charset=UTF-8")).body(("\ufeff"+csv).getBytes(StandardCharsets.UTF_8));
     }

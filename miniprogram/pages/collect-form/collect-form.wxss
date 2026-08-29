@@ -1,6 +1,27 @@
 .intro-card {
   border-left: 8rpx solid #b42318;
 }
+.auto-name {
+  padding: 16rpx 20rpx;
+  border-radius: 12rpx;
+  background: #f4f7f9;
+}
+.auto-name-label {
+  font-size: 23rpx;
+  color: #87949c;
+}
+.auto-name-value {
+  margin-top: 6rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #17212b;
+  line-height: 1.5;
+  word-break: break-all;
+}
+.auto-name-empty {
+  font-weight: 400;
+  color: #a9b4bc;
+}
 .claim-box {
   margin: 12rpx 0;
   padding: 16rpx 20rpx;
@@ -9,6 +30,11 @@
   color: #246b45;
   font-size: 27rpx;
   line-height: 1.6;
+}
+.claim-loc {
+  margin-top: 6rpx;
+  font-size: 24rpx;
+  color: #3d7d59;
 }
 .intro-card .muted {
   line-height: 1.8;
@@ -34,3 +60,39 @@
 .submit-btn {
   margin-top: 16rpx;
 }
+
+.component-section { margin-top: 4rpx; }
+.component-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  padding: 14rpx 0;
+  border-bottom: 1rpx solid #eef1f3;
+}
+.component-head { display: flex; align-items: center; gap: 14rpx; flex: 1; min-width: 0; }
+.component-check {
+  width: 40rpx;
+  height: 40rpx;
+  border-radius: 8rpx;
+  border: 2rpx solid #b9c4cc;
+  background: #fff;
+  color: #fff;
+  font-size: 26rpx;
+  line-height: 36rpx;
+  text-align: center;
+  flex-shrink: 0;
+}
+.component-check.checked { background: #2b7a3f; border-color: #2b7a3f; }
+.component-name { font-size: 28rpx; color: #2c3a42; }
+.component-date {
+  font-size: 25rpx;
+  color: #2b5f8f;
+  background: #eaf3fb;
+  border-radius: 999rpx;
+  padding: 8rpx 20rpx;
+  flex-shrink: 0;
+}
+.component-date-empty { color: #87949c; background: #f1f4f6; }
+.component-date-disabled { color: #b9c4cc; background: #f5f7f8; }
+.component-hint { margin-top: 10rpx; font-size: 23rpx; }

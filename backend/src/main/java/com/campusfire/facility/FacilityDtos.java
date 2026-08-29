@@ -4,12 +4,14 @@ import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 public final class FacilityDtos {
     private FacilityDtos() {}
 
     public static class CreateRequest {
-        @NotBlank(message = "请输入设施编号") public String facilityNo;
+        /** 系统唯一编号：由后端自动生成，前端仅做回传不可修改；管理端仍允许显式指定 */
+        public String facilityNo;
         @NotBlank(message = "请选择设施类型") public String facilityType;
         @NotBlank(message = "请输入设施名称") public String name;
         @NotBlank(message = "请输入校区") public String campus;
@@ -26,10 +28,23 @@ public final class FacilityDtos {
         public LocalDate manufactureDate;
         public LocalDate commissionedDate;
         public String lifecycleStatus = "IN_USE";
+        /** 采集员按位置勾选的部件及各自生产日期；null 表示未提供（保持原值），空数组表示清空 */
+        public List<ComponentInput> components;
     }
 
     public static class UpdateRequest extends CreateRequest {
         @NotNull(message = "设施编号不能为空") public Long id;
+    }
+
+    public static class ComponentInput {
+        @NotBlank(message = "部件编号不能为空") public String itemCode;
+        public LocalDate manufactureDate;
+    }
+
+    public static class Component {
+        public String itemCode;
+        public String itemName;
+        public LocalDate manufactureDate;
     }
 
     public static class Summary {
@@ -54,5 +69,6 @@ public final class FacilityDtos {
         public Long updateRuleId;
         public LocalDate expectedUpdateDate;
         public java.time.LocalDateTime nextMaintenanceAt;
+        public List<Component> components;
     }
 }

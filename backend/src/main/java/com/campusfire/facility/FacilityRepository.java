@@ -7,6 +7,7 @@ import org.springframework.stereotype.Repository;
 
 import java.sql.PreparedStatement;
 import java.sql.Statement;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -26,18 +27,23 @@ public class FacilityRepository {
 
     public long insert(FacilityDtos.CreateRequest r, long creatorId, String qrToken) {
         KeyHolder holder = new GeneratedKeyHolder();
+        // 设施编号是系统唯一标识，由后端生成：前端传空时先用占位值插入，再按自增 ID 回填「F+6位」编号
+        String provided = r.facilityNo == null ? "" : r.facilityNo.trim();
+        String facilityNo = provided.isEmpty() ? "AUTO-" + UUID.randomUUID().toString().replace("-", "") : provided;
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement("INSERT INTO facility " +
                     "(facility_no, facility_type_id, name, campus, building, floor, area, detail_location, " +
                     "latitude, longitude, qr_token, brand, model, specification, manufacture_date, commissioned_date, lifecycle_status, created_by) " +
                     "SELECT ?, id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM facility_type WHERE type_code=?",
                     Statement.RETURN_GENERATED_KEYS);
-            int i=1; ps.setString(i++,r.facilityNo); ps.setString(i++,r.name); ps.setString(i++,r.campus); ps.setString(i++,r.building);
+            int i=1; ps.setString(i++,facilityNo); ps.setString(i++,r.name); ps.setString(i++,r.campus); ps.setString(i++,r.building);
             ps.setString(i++,r.floor); ps.setString(i++,r.area); ps.setString(i++,r.detailLocation); ps.setBigDecimal(i++,r.latitude); ps.setBigDecimal(i++,r.longitude);
             ps.setString(i++,qrToken != null ? qrToken : UUID.randomUUID().toString().replace("-", "")); ps.setString(i++,r.brand); ps.setString(i++,r.model); ps.setString(i++,r.specification);
             ps.setObject(i++,r.manufactureDate); ps.setObject(i++,r.commissionedDate); ps.setString(i++,r.lifecycleStatus); ps.setLong(i++,creatorId); ps.setString(i,r.facilityType); return ps;
         }, holder);
-        return holder.getKey().longValue();
+        long id = holder.getKey().longValue();
+        if (provided.isEmpty()) jdbcTemplate.update("UPDATE facility SET facility_no=? WHERE id=?", String.format("F%06d", id), id);
+        return id;
     }
 
     public Map<String, Object> findQrByToken(String token) {
@@ -78,6 +84,37 @@ public class FacilityRepository {
     public Integer count(String sql, long id) { return jdbcTemplate.queryForObject(sql, Integer.class, id); }
     public int delete(long id) { return jdbcTemplate.update("DELETE FROM facility WHERE id=?", id); }
     public List<Map<String,Object>> findTypes() { return jdbcTemplate.queryForList("SELECT type_code AS typeCode,type_name AS typeName FROM facility_type WHERE enabled=1 ORDER BY id"); }
+
+    public Map<String, String> findItemNames(String typeCode) {
+        return jdbcTemplate.query(
+                "SELECT i.item_code,i.item_name FROM inspection_item i JOIN facility_type t ON t.id=i.facility_type_id " +
+                        "WHERE t.type_code=? AND i.enabled=1 ORDER BY i.sort_order,i.id",
+                rs -> {
+                    Map<String, String> names = new LinkedHashMap<>();
+                    while (rs.next()) names.put(rs.getString("item_code"), rs.getString("item_name"));
+                    return names;
+                }, typeCode);
+    }
+
+    public void deleteComponents(long facilityId) {
+        jdbcTemplate.update("DELETE FROM facility_component WHERE facility_id=?", facilityId);
+    }
+
+    public void insertComponent(long facilityId, String itemCode, String itemName, java.time.LocalDate manufactureDate) {
+        jdbcTemplate.update("INSERT INTO facility_component(facility_id,item_code,item_name,manufacture_date) VALUES(?,?,?,?)",
+                facilityId, itemCode, itemName, manufactureDate);
+    }
+
+    public List<FacilityDtos.Component> findComponents(long facilityId) {
+        return jdbcTemplate.query("SELECT item_code,item_name,manufacture_date FROM facility_component WHERE facility_id=? ORDER BY id",
+                (rs, n) -> {
+                    FacilityDtos.Component c = new FacilityDtos.Component();
+                    c.itemCode = rs.getString("item_code");
+                    c.itemName = rs.getString("item_name");
+                    if (rs.getDate("manufacture_date") != null) c.manufactureDate = rs.getDate("manufacture_date").toLocalDate();
+                    return c;
+                }, facilityId);
+    }
 
     private List<FacilityDtos.Summary> query(String sql, Object... args) {
         return jdbcTemplate.query(sql, (rs,n)-> { FacilityDtos.Summary s=new FacilityDtos.Summary(); s.id=rs.getLong("id"); s.facilityNo=rs.getString("facility_no"); s.facilityType=rs.getString("type_code"); s.name=rs.getString("name"); s.campus=rs.getString("campus"); s.building=rs.getString("building"); s.floor=rs.getString("floor"); s.area=rs.getString("area"); s.detailLocation=rs.getString("detail_location"); s.latitude=rs.getBigDecimal("latitude"); s.longitude=rs.getBigDecimal("longitude"); s.qrToken=rs.getString("qr_token"); s.brand=rs.getString("brand"); s.model=rs.getString("model"); s.specification=rs.getString("specification"); if(rs.getDate("manufacture_date")!=null)s.manufactureDate=rs.getDate("manufacture_date").toLocalDate(); if(rs.getDate("commissioned_date")!=null)s.commissionedDate=rs.getDate("commissioned_date").toLocalDate(); s.lifecycleStatus=rs.getString("lifecycle_status"); s.updateRuleId=rs.getObject("update_rule_id",Long.class); if(rs.getDate("expected_update_date")!=null)s.expectedUpdateDate=rs.getDate("expected_update_date").toLocalDate(); if(rs.getTimestamp("next_maintenance_at")!=null)s.nextMaintenanceAt=rs.getTimestamp("next_maintenance_at").toLocalDateTime(); return s; }, args);

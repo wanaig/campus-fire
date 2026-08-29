@@ -3,6 +3,7 @@
     <view class="card-title">{{facilityName}}</view>
     <view class="muted">编号：{{facilityNo}}</view>
     <view class="muted">位置：{{locationText}}</view>
+    <view class="muted inspector-row">巡检人：{{inspectorName || '当前登录账号'}}</view>
     <view class="verification-row">
       <text class="verification-ok">✓ 有效二维码</text>
       <text class="verification-ok">✓ 定位通过</text>
@@ -11,7 +12,7 @@
     <view wx:if="{{offlineDraft}}" class="offline-hint">当前为本地草稿，尚未上传服务器；网络恢复后请点击“补传草稿”。</view>
   </view>
 
-  <view wx:if="{{loading}}" class="empty">正在加载检查项…</view>
+  <view wx:if="{{loading}}" class="empty">正在加载检查部件…</view>
   <view wx:elif="{{error}}" class="empty">
     <view>{{error}}</view>
     <button class="btn-ghost retry-btn" bindtap="load">重新加载</button>
@@ -21,17 +22,17 @@
     <view class="section-head">
       <view>
         <view class="section-title">{{inspectionTitle}}</view>
-        <view class="muted">参照纸质巡检表逐项检查</view>
+        <view class="muted">按设施档案登记的部件逐项确认（{{items.length}} 项，全部必检）</view>
       </view>
       <view class="progress-count">{{completedCount}} / {{items.length}}</view>
     </view>
-    <view wx:for="{{items}}" wx:key="id" class="card check-card">
+    <view wx:if="{{!items.length}}" class="empty">该设施档案未登记部件，请联系采集员补全档案后再巡检</view>
+    <view wx:for="{{items}}" wx:key="item_code" class="card check-card">
       <view class="row check-head">
         <view class="check-copy">
           <view class="check-name">{{item.item_name}}</view>
           <view wx:if="{{item.inspection_standard && item.inspection_standard !== item.item_name}}" class="check-standard">{{item.inspection_standard}}</view>
         </view>
-        <text wx:if="{{item.required_flag}}" class="required-mark">必检</text>
       </view>
       <view class="choice-row">
         <view
@@ -50,20 +51,20 @@
     </view>
 
     <view class="card">
-      <view class="card-title">现场照片（必拍）</view>
+      <view class="card-title">现场照片（至少1张，最多{{maxPhotos}}张）</view>
       <view class="muted photo-hint">只能现场调用摄像头拍摄，禁止从相册选择{{prompts.length ? '。建议拍摄：' + prompts.join('、') : ''}}</view>
       <view class="photo-grid">
         <view wx:for="{{photos}}" wx:key="photoId" class="photo-cell">
           <image src="{{item.path}}" mode="aspectFill" class="photo-img" />
           <view class="photo-del" data-index="{{index}}" catchtap="removePhoto">删除</view>
         </view>
-        <view wx:if="{{photos.length < 3}}" class="photo-add" bindtap="takePhoto">＋ 拍照</view>
+        <view wx:if="{{photos.length < maxPhotos}}" class="photo-add" bindtap="takePhoto">＋ 拍照</view>
       </view>
     </view>
 
     <view class="card">
       <view class="card-title">备注说明</view>
-      <view class="muted photo-hint">发现异常时必须填写异常情况（如压力不足、箱门破损等）</view>
+      <view class="muted photo-hint">发现异常部件时必须填写异常情况（如压力不足、箱门破损等）</view>
       <textarea class="field-textarea" value="{{note}}" bindinput="onNote" placeholder="填写巡检备注或异常说明" placeholder-class="ph" maxlength="500" />
     </view>
 

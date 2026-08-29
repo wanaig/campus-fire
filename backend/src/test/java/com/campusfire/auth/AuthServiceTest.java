@@ -28,14 +28,14 @@ class AuthServiceTest {
     @Test
     void shouldLoginWithCorrectPassword() {
         UserAccount user = new UserAccount(1L, "admin", "系统管理员",
-                new BCryptPasswordEncoder().encode("Admin@123"), "ADMIN", true, false);
+                new BCryptPasswordEncoder().encode("123456"), "ADMIN", true, false);
         when(repository.findByUsername("admin")).thenReturn(Optional.of(user));
         when(tokenService.create(user)).thenReturn("signed-token");
         when(tokenService.getExpirationSeconds()).thenReturn(28800L);
 
         LoginRequest request = new LoginRequest();
         request.setUsername("admin");
-        request.setPassword("Admin@123");
+        request.setPassword("123456");
         LoginResponse response = authService.login(request);
 
         assertEquals("signed-token", response.getAccessToken());
@@ -45,7 +45,7 @@ class AuthServiceTest {
     @Test
     void shouldRejectWrongPassword() {
         UserAccount user = new UserAccount(1L, "admin", "系统管理员",
-                new BCryptPasswordEncoder().encode("Admin@123"), "ADMIN", true, false);
+                new BCryptPasswordEncoder().encode("123456"), "ADMIN", true, false);
         when(repository.findByUsername("admin")).thenReturn(Optional.of(user));
         LoginRequest request = new LoginRequest();
         request.setUsername("admin");

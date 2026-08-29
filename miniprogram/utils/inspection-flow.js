@@ -128,6 +128,14 @@ async function startCollectByScan() {
     app.globalData.editFacility = null
     app.globalData.claimToken = token
     app.globalData.claimSerial = result.serialNo
+    app.globalData.claimLocation = {
+      school: result.school || '',
+      campus: result.campus || '',
+      building: result.building || '',
+      floor: result.floor || '',
+      locationLabel: result.locationLabel || '',
+      labelCode: result.labelCode || '',
+    }
     wx.navigateTo({ url: '/pages/collect-form/collect-form' })
     return true
   }
@@ -135,6 +143,7 @@ async function startCollectByScan() {
     app.globalData.editFacility = result.facility
     app.globalData.claimToken = null
     app.globalData.claimSerial = null
+    app.globalData.claimLocation = null
     wx.navigateTo({ url: '/pages/collect-form/collect-form' })
     return true
   }

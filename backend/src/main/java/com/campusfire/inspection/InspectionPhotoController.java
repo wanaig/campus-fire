@@ -4,7 +4,9 @@ import com.campusfire.auth.AuthService;
 import com.campusfire.auth.AuthenticatedUser;
 import com.campusfire.common.api.ApiResponse;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
@@ -66,6 +68,25 @@ public class InspectionPhotoController {
         List<String> selected = new ArrayList<>(candidates);
         Collections.shuffle(selected);
         return ApiResponse.success(Collections.singletonMap("prompts", selected.subList(0, Math.min(2, selected.size()))));
+    }
+
+    /** 管理端查看巡检留痕照片：已登录用户可读取，路径校验防止越界 */
+    @GetMapping("/photos/{photoId}/file")
+    public ResponseEntity<byte[]> file(@PathVariable String photoId) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT storage_path,content_type FROM inspection_photo WHERE id=?", photoId);
+        if (rows.isEmpty()) return ResponseEntity.notFound().build();
+        Path target = Paths.get(String.valueOf(rows.get(0).get("storage_path"))).toAbsolutePath().normalize();
+        if (!target.startsWith(storageRoot)) return ResponseEntity.notFound().build();
+        try {
+            byte[] bytes = Files.readAllBytes(target);
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CACHE_CONTROL, "private, max-age=3600")
+                    .contentType(MediaType.parseMediaType(String.valueOf(rows.get(0).get("content_type"))))
+                    .body(bytes);
+        } catch (IOException e) {
+            return ResponseEntity.notFound().build();
+        }
     }
 
     @PostMapping(value = "/sessions/{sessionId}/photos", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

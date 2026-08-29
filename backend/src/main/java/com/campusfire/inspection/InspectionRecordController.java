@@ -17,6 +17,7 @@ import org.springframework.security.core.Authentication;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,37 +38,38 @@ public class InspectionRecordController {
     }
 
     @GetMapping
-    public ApiResponse<List<Map<String, Object>>> list(@RequestParam(required = false) String facilityNo) {
+    public ApiResponse<List<Map<String, Object>>> list(@RequestParam(required = false) String facilityNo,
+                                                       @RequestParam(required = false) String inspector) {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT r.id,r.task_id,r.submitted_at,r.results_json,r.note,r.photo_count,c.reason AS void_reason,f.facility_no,f.name,f.campus,f.building,f.floor,f.area,u.display_name AS inspector FROM inspection_record r LEFT JOIN (SELECT record_id,MAX(id) AS max_id FROM inspection_record_correction GROUP BY record_id) lc ON lc.record_id=r.id LEFT JOIN inspection_record_correction c ON c.id=lc.max_id JOIN facility f ON f.id=(SELECT facility_id FROM inspection_task WHERE id=r.task_id) JOIN app_user u ON u.id=r.user_id WHERE (? IS NULL OR f.facility_no=?) ORDER BY r.submitted_at DESC",
-                facilityNo, facilityNo);
+                "SELECT r.id,r.task_id,r.submitted_at,r.results_json,r.note,r.photo_count,c.reason AS void_reason,f.facility_no,f.name,f.campus,f.building,f.floor,f.area,u.display_name AS inspector FROM inspection_record r LEFT JOIN (SELECT record_id,MAX(id) AS max_id FROM inspection_record_correction GROUP BY record_id) lc ON lc.record_id=r.id LEFT JOIN inspection_record_correction c ON c.id=lc.max_id JOIN facility f ON f.id=(SELECT facility_id FROM inspection_task WHERE id=r.task_id) JOIN app_user u ON u.id=r.user_id WHERE (? IS NULL OR f.facility_no=?) AND (? IS NULL OR u.display_name LIKE CONCAT('%',?,'%')) ORDER BY r.submitted_at DESC",
+                facilityNo, facilityNo, inspector, inspector);
         if (!rows.isEmpty()) attachStructuredResults(rows);
         return ApiResponse.success(rows);
     }
 
-    /** 把 results_json 转成 [{code,name,status}]，部件名称按设施类型的检查项配置翻译 */
+    /** 把 results_json 转成 [{code,name,status}]，部件名称优先按采集员建档登记的档案部件翻译 */
     private void attachStructuredResults(List<Map<String, Object>> rows) {
-        Map<Object, Long> taskTypes = new HashMap<>();
+        Map<Object, Long> taskFacility = new HashMap<>();
         StringBuilder placeholders = new StringBuilder();
         for (Map<String, Object> row : rows) {
             Object taskId = row.get("task_id");
-            if (!taskTypes.containsKey(taskId)) {
+            if (!taskFacility.containsKey(taskId)) {
                 if (placeholders.length() > 0) placeholders.append(',');
                 placeholders.append('?');
             }
-            taskTypes.put(taskId, null);
+            taskFacility.put(taskId, null);
         }
         jdbcTemplate.query(
-                "SELECT t.id AS task_id,f.facility_type_id FROM inspection_task t JOIN facility f ON f.id=t.facility_id WHERE t.id IN (" + placeholders + ")",
+                "SELECT t.id AS task_id,f.id AS facility_id FROM inspection_task t JOIN facility f ON f.id=t.facility_id WHERE t.id IN (" + placeholders + ")",
                 resultSet -> {
                     Map<Object, Long> found = new HashMap<>();
-                    while (resultSet.next()) found.put(resultSet.getObject("task_id"), resultSet.getLong("facility_type_id"));
+                    while (resultSet.next()) found.put(resultSet.getObject("task_id"), resultSet.getLong("facility_id"));
                     return found;
-                }, taskTypes.keySet().toArray()).forEach(taskTypes::put);
-        Map<Long, LinkedHashMap<String, String>> typeLabels = resultSupport.loadItemLabels();
+                }, taskFacility.keySet().toArray()).forEach(taskFacility::put);
+        Map<Long, LinkedHashMap<String, String>> facilityLabels = resultSupport.loadFacilityLabels(new HashSet<>(taskFacility.values()));
         for (Map<String, Object> row : rows) {
             Map<String, String> results = resultSupport.parseResults(row.get("results_json"));
-            LinkedHashMap<String, String> labels = typeLabels.getOrDefault(taskTypes.get(row.get("task_id")), new LinkedHashMap<>());
+            LinkedHashMap<String, String> labels = facilityLabels.getOrDefault(taskFacility.get(row.get("task_id")), new LinkedHashMap<>());
             List<Map<String, Object>> structured = new ArrayList<>();
             for (Map.Entry<String, String> entry : labels.entrySet()) {
                 if (results.containsKey(entry.getKey())) {
@@ -81,6 +83,21 @@ public class InspectionRecordController {
             }
             row.put("results", structured);
         }
+    }
+
+    /** 管理端查看某条巡检记录的现场照片清单，照片文件经 /inspection/photos/{photoId}/file 拉取 */
+    @GetMapping("/{id}/photos")
+    public ApiResponse<List<Map<String, Object>>> photos(@PathVariable String id) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT p.id,p.client_captured_at,p.received_at FROM inspection_photo p JOIN inspection_record r ON r.session_id=p.session_id WHERE r.id=? ORDER BY p.received_at,p.id", id);
+        List<Map<String, Object>> photos = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> photo = new LinkedHashMap<>();
+            photo.put("photoId", String.valueOf(row.get("id")));
+            photo.put("capturedAt", row.get("client_captured_at"));
+            photos.add(photo);
+        }
+        return ApiResponse.success(photos);
     }
 
     private Map<String, Object> structuredItem(String code, String name, String status) {

@@ -1,6 +1,11 @@
 .head-card {
   border-left: 8rpx solid #b42318;
 }
+.inspector-row {
+  margin-top: 6rpx;
+  color: #246b45;
+  font-weight: 600;
+}
 .verification-row { display: flex; flex-wrap: wrap; gap: 10rpx; margin-top: 16rpx; }
 .verification-ok { padding: 7rpx 12rpx; border-radius: 8rpx; background: #e3f3e9; color: #246b45; font-size: 23rpx; }
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 20rpx; margin: 30rpx 4rpx 18rpx; }

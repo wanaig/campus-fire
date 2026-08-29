@@ -2,7 +2,7 @@
 # 用法：powershell -ExecutionPolicy Bypass -File deploy/e2e-smoke.ps1 [-BaseUrl http://localhost:8080/api]
 param(
     [string]$BaseUrl = "http://localhost:8080/api",
-    [string]$AdminPassword = "Admin@123",
+    [string]$AdminPassword = "123456",
     [string]$GuardPassword = "Guard@123"
 )
 

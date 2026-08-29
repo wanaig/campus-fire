@@ -23,8 +23,8 @@ import java.time.LocalDate;
 @RestController
 @RequestMapping("/inspection")
 public class InspectionSessionController {
-    private final JdbcTemplate jdbcTemplate; private final AuthService authService; private final ObjectMapper objectMapper; private final AuditService auditService;
-    public InspectionSessionController(JdbcTemplate jdbcTemplate, AuthService authService,ObjectMapper objectMapper, AuditService auditService){this.jdbcTemplate=jdbcTemplate;this.authService=authService;this.objectMapper=objectMapper;this.auditService=auditService;}
+    private final JdbcTemplate jdbcTemplate; private final AuthService authService; private final ObjectMapper objectMapper; private final AuditService auditService; private final InspectionResultSupport resultSupport;
+    public InspectionSessionController(JdbcTemplate jdbcTemplate, AuthService authService,ObjectMapper objectMapper, AuditService auditService, InspectionResultSupport resultSupport){this.jdbcTemplate=jdbcTemplate;this.authService=authService;this.objectMapper=objectMapper;this.auditService=auditService;this.resultSupport=resultSupport;}
 
     @GetMapping("/tasks")
     public ApiResponse<List<Map<String,Object>>> tasks(Authentication a,@RequestParam(required=false) String status){AuthenticatedUser u=current(a);String sql="SELECT t.id,t.due_date,t.status,f.id AS facility_id,f.facility_no,f.name,f.campus,f.building,f.floor,f.area,f.detail_location,ft.type_code AS facility_type FROM inspection_task t JOIN facility f ON f.id=t.facility_id LEFT JOIN facility_type ft ON ft.id=f.facility_type_id WHERE (t.assigned_user_id=? OR t.assigned_user_id IS NULL) AND (? IS NULL OR t.status=?) ORDER BY t.due_date,t.id";return ApiResponse.success(jdbcTemplate.queryForList(sql,u.getId(),status,status));}
@@ -33,6 +33,25 @@ public class InspectionSessionController {
     public ApiResponse<?> start(@Valid @RequestBody StartRequest r,Authentication a){AuthenticatedUser u=current(a);Map<String,Object> task=jdbcTemplate.queryForMap("SELECT t.id,t.facility_id,t.assigned_user_id,t.status,f.qr_token,f.latitude,f.longitude FROM inspection_task t JOIN facility f ON f.id=t.facility_id WHERE t.id=?",r.taskId);if(task.get("assigned_user_id")!=null&&!u.getId().equals(((Number)task.get("assigned_user_id")).longValue())&&!"ADMIN".equals(u.getRoleCode()))throw new AccessDeniedException("当前任务未分配给此账号");
         if("IN_PROGRESS".equals(task.get("status"))){List<Map<String,Object>> resumed=jdbcTemplate.queryForList("SELECT id,latitude,longitude,started_at FROM inspection_session WHERE task_id=? AND user_id=? AND status='STARTED' ORDER BY started_at DESC LIMIT 1",r.taskId,u.getId());if(!resumed.isEmpty()){Map<String,Object> s=resumed.get(0);return ApiResponse.success(new SessionResponse((String)s.get("id"),r.taskId,((java.sql.Timestamp)s.get("started_at")).toInstant(),(BigDecimal)s.get("latitude"),(BigDecimal)s.get("longitude")));}throw new IllegalArgumentException("任务正在由其他人员巡检，暂不能开始");}
         if(!"PENDING".equals(task.get("status")))throw new IllegalArgumentException("任务当前不可开始");if(!Objects.equals(task.get("qr_token"),r.qrToken))throw new IllegalArgumentException("二维码无效或不属于当前任务");Double distance=distance(task.get("latitude"),task.get("longitude"),r.latitude,r.longitude);if(distance!=null&&distance>Math.max(r.allowedDistanceMeters==null?100:r.allowedDistanceMeters,10))throw new IllegalArgumentException("当前定位不在设施附近，不能开始巡检");String sessionId=UUID.randomUUID().toString();int updated=jdbcTemplate.update("UPDATE inspection_task SET status='IN_PROGRESS' WHERE id=? AND status='PENDING'",r.taskId);if(updated==0)throw new IllegalArgumentException("任务已被开始，请刷新后重试");jdbcTemplate.update("INSERT INTO inspection_session(id,task_id,user_id,qr_token_snapshot,latitude,longitude,location_distance_meters) VALUES(?,?,?,?,?,?,?)",sessionId,r.taskId,u.getId(),r.qrToken,r.latitude,r.longitude,distance);return ApiResponse.success(new SessionResponse(sessionId,r.taskId,Instant.now(),r.latitude,r.longitude));}
+
+    /** 保安逐项确认的部件清单：取该设施档案登记的部件（与采集员建档一致），存量设施回退类型检查项 */
+    @GetMapping("/sessions/{sessionId}/components")
+    public ApiResponse<?> components(@PathVariable String sessionId, Authentication a) {
+        AuthenticatedUser u = current(a);
+        List<Map<String, Object>> sessions = jdbcTemplate.queryForList("SELECT task_id FROM inspection_session WHERE id=? AND user_id=? AND status='STARTED'", sessionId, u.getId());
+        if (sessions.isEmpty()) throw new AccessDeniedException("巡检会话无效或不属于当前账号");
+        Long taskId = ((Number) sessions.get(0).get("task_id")).longValue();
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (InspectionResultSupport.CheckItem item : resultSupport.loadCheckItems(taskId).values()) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("item_code", item.itemCode);
+            row.put("item_name", item.itemName);
+            row.put("inspection_standard", item.standard);
+            row.put("required_flag", true);
+            items.add(row);
+        }
+        return ApiResponse.success(items);
+    }
 
     @PostMapping("/sessions/{sessionId}/draft")
     public ApiResponse<?> draft(@PathVariable String sessionId,@Valid @RequestBody DraftRequest r,Authentication a){AuthenticatedUser u=current(a);Integer count=jdbcTemplate.queryForObject("SELECT COUNT(*) FROM inspection_session WHERE id=? AND task_id=? AND user_id=? AND status='STARTED'",Integer.class,sessionId,r.taskId,u.getId());if(count==null||count==0)throw new AccessDeniedException("巡检会话无效或不属于当前账号");try{String json=objectMapper.writeValueAsString(r.results);jdbcTemplate.update("INSERT INTO inspection_draft(session_id,results_json,note) VALUES(?,?,?) ON DUPLICATE KEY UPDATE results_json=VALUES(results_json),note=VALUES(note)",sessionId,json,r.note);}catch(JsonProcessingException e){throw new IllegalArgumentException("检查项数据格式不正确");}return ApiResponse.success(Collections.singletonMap("saved",true));}
@@ -75,24 +94,21 @@ public class InspectionSessionController {
         }
     }
 
+    /** 提交校验：档案登记的每个部件都必须给出 正常/异常 结论；有异常必须填写说明 */
     private Map<String, String> validateResults(Long taskId, Map<String, Object> draft) {
         try {
             Map<String, String> results = objectMapper.readValue(String.valueOf(draft.get("results_json")), Map.class);
-            List<String> requiredCodes = jdbcTemplate.queryForList(
-                    "SELECT item.item_code FROM inspection_task task " +
-                            "JOIN facility facility ON facility.id=task.facility_id " +
-                            "JOIN inspection_item item ON item.facility_type_id=facility.facility_type_id " +
-                            "WHERE task.id=? AND item.required_flag=1 AND item.enabled=1 ORDER BY item.sort_order,item.id",
-                    String.class, taskId);
-            for (String code : requiredCodes) {
-                String value = results.get(code);
+            LinkedHashMap<String, InspectionResultSupport.CheckItem> checkItems = resultSupport.loadCheckItems(taskId);
+            if (checkItems.isEmpty()) throw new IllegalArgumentException("该设施档案未登记部件，请联系采集员补全档案后再巡检");
+            for (Map.Entry<String, InspectionResultSupport.CheckItem> entry : checkItems.entrySet()) {
+                String value = results.get(entry.getKey());
                 if (!"PASS".equals(value) && !"FAIL".equals(value)) {
-                    throw new IllegalArgumentException("请完成全部必检项后再提交");
+                    throw new IllegalArgumentException("请完成部件「" + entry.getValue().itemName + "」的检查确认");
                 }
             }
             boolean hasAbnormal = results.values().stream().anyMatch("FAIL"::equals);
             if (hasAbnormal && (draft.get("note") == null || String.valueOf(draft.get("note")).trim().isEmpty())) {
-                throw new IllegalArgumentException("存在异常项，请填写异常情况说明");
+                throw new IllegalArgumentException("存在异常部件，请填写异常情况说明");
             }
             return results;
         } catch (JsonProcessingException e) {
@@ -101,18 +117,13 @@ public class InspectionSessionController {
     }
 
     private void createRectificationIfNeeded(String recordId, Long taskId, Map<String, String> results) {
-        Map<String, String> labels = jdbcTemplate.query(
-                "SELECT item.item_code,item.item_name FROM inspection_task task " +
-                        "JOIN facility facility ON facility.id=task.facility_id " +
-                        "JOIN inspection_item item ON item.facility_type_id=facility.facility_type_id WHERE task.id=?",
-                resultSet -> {
-                    Map<String, String> values = new HashMap<>();
-                    while (resultSet.next()) values.put(resultSet.getString("item_code"), resultSet.getString("item_name"));
-                    return values;
-                }, taskId);
+        LinkedHashMap<String, InspectionResultSupport.CheckItem> checkItems = resultSupport.loadCheckItems(taskId);
         List<String> abnormal = new ArrayList<>();
         for (Map.Entry<String, String> entry : results.entrySet()) {
-            if ("FAIL".equals(entry.getValue())) abnormal.add(labels.getOrDefault(entry.getKey(), entry.getKey()) + "异常");
+            if ("FAIL".equals(entry.getValue())) {
+                InspectionResultSupport.CheckItem item = checkItems.get(entry.getKey());
+                abnormal.add((item == null ? entry.getKey() : item.itemName) + "异常");
+            }
         }
         if (abnormal.isEmpty()) return;
         Map<String, Object> task = jdbcTemplate.queryForMap("SELECT facility_id FROM inspection_task WHERE id=?", taskId);

@@ -22,7 +22,11 @@ public class FacilityService {
 
     public List<FacilityDtos.Summary> list(String keyword) { return repository.findAll(keyword); }
     public List<Map<String,Object>> types() { return repository.findTypes(); }
-    public FacilityDtos.Summary detail(long id) { return repository.findById(id).orElseThrow(() -> new IllegalArgumentException("设施不存在")); }
+    public FacilityDtos.Summary detail(long id) {
+        FacilityDtos.Summary facility = repository.findById(id).orElseThrow(() -> new IllegalArgumentException("设施不存在"));
+        facility.components = repository.findComponents(id);
+        return facility;
+    }
 
     @Transactional
     public FacilityDtos.Summary create(FacilityDtos.CreateRequest request, long operatorId, String role) {
@@ -41,6 +45,7 @@ public class FacilityService {
                 id = repository.insert(request, operatorId, null);
             }
             repository.applyDefaultRule(id);
+            saveComponents(id, request.facilityType, request.components);
             FacilityDtos.Summary facility = detail(id);
             auditService.record(operatorId, "FACILITY_CREATE", "FACILITY", String.valueOf(facility.id), details(facility));
             return facility;
@@ -52,9 +57,26 @@ public class FacilityService {
     public FacilityDtos.Summary update(FacilityDtos.UpdateRequest request, long operatorId, String role) {
         requireEditor(role);
         if(repository.update(request)==0) throw new IllegalArgumentException("设施不存在或设施类型无效");
+        // 管理端编辑不传 components（null），保持已登记部件不变；小程序编辑总是传完整列表
+        if (request.components != null) saveComponents(request.id, request.facilityType, request.components);
         FacilityDtos.Summary facility = detail(request.id);
         auditService.record(operatorId, "FACILITY_UPDATE", "FACILITY", String.valueOf(request.id), details(facility));
         return facility;
+    }
+
+    /** 保存建档勾选的部件清单：部件必须属于该类型的启用检查项，勾选的必须填写生产日期 */
+    private void saveComponents(long facilityId, String facilityType, List<FacilityDtos.ComponentInput> components) {
+        repository.deleteComponents(facilityId);
+        if (components == null || components.isEmpty()) return;
+        Map<String, String> itemNames = repository.findItemNames(facilityType);
+        for (FacilityDtos.ComponentInput component : components) {
+            if (component == null || component.itemCode == null || component.itemCode.trim().isEmpty()) continue;
+            String code = component.itemCode.trim();
+            String name = itemNames.get(code);
+            if (name == null) throw new IllegalArgumentException("部件「" + code + "」不属于该设施类型的检查项，请刷新后重试");
+            if (component.manufactureDate == null) throw new IllegalArgumentException("请填写「" + name + "」的生产日期");
+            repository.insertComponent(facilityId, code, name, component.manufactureDate);
+        }
     }
 
     @Transactional

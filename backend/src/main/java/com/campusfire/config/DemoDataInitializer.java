@@ -29,8 +29,8 @@ public class DemoDataInitializer implements CommandLineRunner {
 
     public DemoDataInitializer(JdbcTemplate jdbcTemplate, PasswordEncoder passwordEncoder,
                                @Value("${app.seed-demo.enabled:true}") boolean enabled,
-                               @Value("${app.seed-demo.guard-password:Guard@123}") String guardPassword,
-                               @Value("${app.seed-demo.collector-password:Collect@123}") String collectorPassword) {
+                               @Value("${app.seed-demo.guard-password:123456}") String guardPassword,
+                               @Value("${app.seed-demo.collector-password:123456}") String collectorPassword) {
         this.jdbcTemplate = jdbcTemplate;
         this.passwordEncoder = passwordEncoder;
         this.enabled = enabled;

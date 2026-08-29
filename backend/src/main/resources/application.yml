@@ -44,8 +44,8 @@ app:
   seed-admin:
     enabled: ${SEED_ADMIN_ENABLED:true}
     username: ${SEED_ADMIN_USERNAME:admin}
-    password: ${SEED_ADMIN_PASSWORD:Admin@123}
+    password: ${SEED_ADMIN_PASSWORD:123456}
   seed-demo:
     enabled: ${SEED_DEMO_ENABLED:true}
-    guard-password: ${SEED_DEMO_GUARD_PASSWORD:Guard@123}
-    collector-password: ${SEED_DEMO_COLLECTOR_PASSWORD:Collect@123}
+    guard-password: ${SEED_DEMO_GUARD_PASSWORD:123456}
+    collector-password: ${SEED_DEMO_COLLECTOR_PASSWORD:123456}

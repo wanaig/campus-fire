@@ -58,9 +58,9 @@ powershell -ExecutionPolicy Bypass -File deploy\stop-all.ps1 -KeepDocker  # 只�
 
 | 角色 | 账号 | 密码 | 用途 |
 |------|------|------|------|
-| 管理员 | admin | Admin@123 | 管理后台 |
-| 保安 | guard | Guard@123 | 小程序巡检 |
-| 数据采集员 | collector | Collect@123 | 小程序设施建档 |
+| 管理员 | admin | 123456 | 管理后台 |
+| 保安 | guard | 123456 | 小程序巡检 |
+| 数据采集员 | collector | 123456 | 小程序设施建档 |
 
 演示数据含 6 个示例设施（广州坐标）和今日巡检任务。微信开发者工具默认模拟定位也是广州，可直接体验定位校验。
 

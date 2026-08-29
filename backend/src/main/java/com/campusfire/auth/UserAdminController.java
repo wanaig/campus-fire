@@ -111,7 +111,7 @@ public class UserAdminController {
                 "SELECT COUNT(*) FROM inspection_task WHERE assigned_user_id=?",
                 "SELECT COUNT(*) FROM maintenance_record WHERE created_by=?",
                 "SELECT COUNT(*) FROM rectification_order WHERE resolved_by=?",
-                "SELECT COUNT(*) FROM inspection_plan WHERE assigned_user_id=?",
+                "SELECT COUNT(*) FROM inspection_plan WHERE assigned_user_id=? AND deleted=0",
         };
         for (String sql : references) {
             Integer count = jdbcTemplate.queryForObject(sql, Integer.class, id);

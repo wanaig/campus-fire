@@ -9,6 +9,7 @@ Page({
     facilityName: '',
     facilityNo: '',
     locationText: '',
+    inspectorName: '',
     inspectionTitle: '消防设施巡检记录',
     items: [],
     results: {},
@@ -16,6 +17,7 @@ Page({
     note: '',
     prompts: [],
     photos: [],
+    maxPhotos: 6,
     loading: true,
     error: '',
     submitting: false,
@@ -33,14 +35,16 @@ Page({
       largeText: app.globalData.largeText,
       facilityType: query.facilityType || 'OTHER',
       inspectionTitle: query.facilityType === 'FIRE_HYDRANT' ? '室内消火栓巡检记录' : '消防设施巡检记录',
+      inspectorName: (app.globalData.user && app.globalData.user.displayName) || '',
     })
     this.load()
   },
   async load() {
     this.setData({ loading: true, error: '' })
     try {
+      // 部件清单来自该设施档案登记的部件（与采集员建档勾选一致），由后端保证
       const [items, prompts, draft] = await Promise.all([
-        request('/inspection-items', { data: { facilityType: this.data.facilityType } }),
+        request(`/inspection/sessions/${this.data.sessionId}/components`),
         request(`/inspection/sessions/${this.data.sessionId}/photo-prompts`).catch(() => ({ prompts: [] })),
         request(`/inspection/sessions/${this.data.sessionId}/draft`).catch(() => null),
       ])
@@ -72,14 +76,14 @@ Page({
     this.setData({ note: e.detail.value })
   },
   async takePhoto() {
-    if (this.data.photos.length >= 3) {
-      wx.showToast({ title: '最多拍摄3张现场照片', icon: 'none' })
+    if (this.data.photos.length >= this.data.maxPhotos) {
+      wx.showToast({ title: `最多拍摄${this.data.maxPhotos}张现场照片`, icon: 'none' })
       return
     }
     try {
       const choice = await new Promise((resolve, reject) => {
         wx.chooseMedia({
-          count: 3 - this.data.photos.length,
+          count: this.data.maxPhotos - this.data.photos.length,
           mediaType: ['image'],
           sourceType: ['camera'],
           sizeType: ['compressed'],
@@ -113,14 +117,15 @@ Page({
     this.setData({ photos })
   },
   validate() {
+    // 档案登记的每个部件都必须给出 正常/异常 结论，不能遗漏
     for (const item of this.data.items) {
-      if (item.required_flag && !this.data.results[item.item_code]) {
-        return `请完成检查项「${item.item_name}」`
+      if (!this.data.results[item.item_code]) {
+        return `请完成部件「${item.item_name}」的检查确认`
       }
     }
     const hasAbnormal = Object.values(this.data.results).some(value => value === 'FAIL')
     if (hasAbnormal && !this.data.note.trim()) {
-      return '存在异常项，请在备注中说明异常情况'
+      return '存在异常部件，请在备注中说明异常情况'
     }
     if (!this.data.photos.length) {
       return '请至少拍摄1张现场照片留痕'
@@ -177,7 +182,7 @@ Page({
     const confirm = await new Promise(resolve => {
       wx.showModal({
         title: '确认提交巡检结果',
-        content: '提交后将形成正式巡检记录，不能自行修改或删除。异常项会自动生成整改单。',
+        content: '提交后将形成正式巡检记录，记录巡检人和各部件检查结论，不能自行修改或删除。异常部件会自动生成整改单。',
         success: res => resolve(res.confirm),
         fail: () => resolve(false),
       })

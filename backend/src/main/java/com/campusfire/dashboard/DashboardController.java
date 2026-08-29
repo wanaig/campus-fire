@@ -61,29 +61,29 @@ public class DashboardController {
     /** 近 N 天巡检记录中异常部件分布，与检查项配置联动（如消火栓六部件） */
     private List<Map<String, Object>> componentIssueSummary(int days) {
         List<Map<String, Object>> records = jdbcTemplate.queryForList(
-                "SELECT f.facility_type_id,r.results_json FROM inspection_record r " +
+                "SELECT f.id AS facility_id,r.results_json FROM inspection_record r " +
                         "JOIN inspection_task t ON t.id=r.task_id JOIN facility f ON f.id=t.facility_id " +
                         "WHERE r.submitted_at>=DATE_SUB(CURDATE(),INTERVAL ? DAY)", days);
         if (records.isEmpty()) return Collections.emptyList();
-        Map<Long, LinkedHashMap<String, String>> typeLabels = resultSupport.loadItemLabels();
+        // 部件名优先按采集员建档登记的档案部件翻译，与巡检记录页保持一致
+        Map<Long, LinkedHashMap<String, String>> facilityLabels = resultSupport.loadFacilityLabels(
+                records.stream().map(record -> ((Number) record.get("facility_id")).longValue())
+                        .collect(java.util.stream.Collectors.toSet()));
         Map<String, Integer> counts = new LinkedHashMap<>();
         Map<String, String> names = new HashMap<>();
-        Map<String, String> codes = new HashMap<>();
         for (Map<String, Object> record : records) {
-            Long typeId = ((Number) record.get("facility_type_id")).longValue();
-            Map<String, String> labels = typeLabels.getOrDefault(typeId, new LinkedHashMap<>());
+            LinkedHashMap<String, String> labels = facilityLabels.getOrDefault(
+                    ((Number) record.get("facility_id")).longValue(), new LinkedHashMap<>());
             for (Map.Entry<String, String> entry : resultSupport.parseResults(record.get("results_json")).entrySet()) {
                 if (!"FAIL".equals(entry.getValue())) continue;
-                String key = typeId + ":" + entry.getKey();
-                counts.merge(key, 1, Integer::sum);
-                names.putIfAbsent(key, labels.getOrDefault(entry.getKey(), entry.getKey()));
-                codes.putIfAbsent(key, entry.getKey());
+                counts.merge(entry.getKey(), 1, Integer::sum);
+                names.putIfAbsent(entry.getKey(), labels.getOrDefault(entry.getKey(), entry.getKey()));
             }
         }
         List<Map<String, Object>> summary = new ArrayList<>();
         for (Map.Entry<String, Integer> entry : counts.entrySet()) {
             Map<String, Object> item = new LinkedHashMap<>();
-            item.put("itemCode", codes.get(entry.getKey()));
+            item.put("itemCode", entry.getKey());
             item.put("itemName", names.get(entry.getKey()));
             item.put("failCount", entry.getValue());
             summary.add(item);

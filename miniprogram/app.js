@@ -6,6 +6,7 @@ App({
     editFacility: null,
     claimToken: null,
     claimSerial: null,
+    claimLocation: null,
   },
   onLaunch() {
     this.globalData.user = wx.getStorageSync('user') || null

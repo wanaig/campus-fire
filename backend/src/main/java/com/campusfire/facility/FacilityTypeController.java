@@ -82,7 +82,7 @@ public class FacilityTypeController {
         Map<String, Object> type = find(id);
         int facilityCount = count("SELECT COUNT(*) FROM facility WHERE facility_type_id=?", id);
         int itemCount = count("SELECT COUNT(*) FROM inspection_item WHERE facility_type_id=?", id);
-        int planCount = count("SELECT COUNT(*) FROM inspection_plan WHERE facility_type_id=?", id);
+        int planCount = count("SELECT COUNT(*) FROM inspection_plan WHERE facility_type_id=? AND deleted=0", id);
         int ruleCount = count("SELECT COUNT(*) FROM facility_update_rule WHERE facility_type_id=?", id);
         if (facilityCount + itemCount + planCount + ruleCount > 0) {
             throw new IllegalArgumentException(String.format(
