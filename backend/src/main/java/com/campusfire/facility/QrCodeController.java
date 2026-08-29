@@ -74,11 +74,12 @@ public class QrCodeController {
         }
         if (rows.isEmpty()) throw new IllegalArgumentException("没有符合条件的二维码");
         List<PdfService.LabelData> labels = new ArrayList<>();
+        Map<String, Integer> floorCounters = new LinkedHashMap<>();
         for (Map<String, Object> row : rows) {
             String serial = String.valueOf(row.get("serial_no"));
             String location = joinLocation(row);
             String facility = row.get("facility_no") == null ? "" : String.valueOf(row.get("facility_name")) + "（" + row.get("facility_no") + "）";
-            String displayCode = labelDisplayCode(row, serial);
+            String displayCode = labelDisplayCode(row, serial, floorCounters);
             labels.add(new PdfService.LabelData(String.valueOf(row.get("token")), serial, location, facility, displayCode));
         }
         byte[] pdf = pdfService.labelsPdf(labels);
@@ -117,12 +118,14 @@ public class QrCodeController {
         return sb.toString();
     }
 
-    private String labelDisplayCode(Map<String, Object> row, String serial) {
+    /** 标签编号：同一「校区+楼栋+楼层」内按打印顺序从 01 起连续编号，每次打印都重新从 01 开始 */
+    private String labelDisplayCode(Map<String, Object> row, String serial, Map<String, Integer> floorCounters) {
         String building = value(row.get("building"));
         String floor = value(row.get("floor"));
-        Object locationNo = row.get("location_no");
-        if (!building.isEmpty() && !floor.isEmpty() && locationNo instanceof Number) {
-            return "NO." + building + "-" + floor + "-" + String.format("%02d", ((Number) locationNo).intValue());
+        if (!building.isEmpty() && !floor.isEmpty()) {
+            String key = value(row.get("school")) + "|" + value(row.get("campus")) + "|" + building + "|" + floor;
+            int position = floorCounters.merge(key, 1, Integer::sum);
+            return "NO." + building + "-" + floor + "-" + String.format("%02d", position);
         }
         try {
             return "NO." + String.format("%03d", Integer.parseInt(serial));
