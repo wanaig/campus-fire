@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -24,12 +25,17 @@ import org.springframework.transaction.annotation.Transactional;
 import javax.validation.Valid;
 import javax.validation.constraints.Max;
 import javax.validation.constraints.Min;
+import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
+import javax.validation.constraints.Size;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @RestController
@@ -52,10 +58,11 @@ public class QrCodeController {
         this.pdfService = pdfService;
     }
 
-    /** 标签 PDF：按筛选条件输出二维码标签（每页 9 张）。 */
+    /** 标签 PDF：按筛选条件输出二维码介绍标签，每个二维码一张横向 A4。 */
     @GetMapping("/labels.pdf")
     public ResponseEntity<byte[]> labelsPdf(@RequestParam(required = false) String status,
                                             @RequestParam(required = false) List<Long> ids,
+                                            @RequestParam(required = false) String keyword,
                                             Authentication authentication) throws Exception {
         requireAdmin(authentication);
         if ("DELETED".equals(status)) throw new IllegalArgumentException("已删除的二维码不能下载标签 PDF，请先恢复");
@@ -64,39 +71,34 @@ public class QrCodeController {
             String placeholders = String.join(",", Collections.nCopies(ids.size(), "?"));
             Object[] args = new Object[ids.size()];
             for (int i = 0; i < ids.size(); i++) args[i] = ids.get(i);
-            rows = jdbcTemplate.queryForList("SELECT q.token,q.serial_no,q.school,q.campus,q.building,q.floor,q.location_no,f.facility_no,f.name AS facility_name " +
+            rows = jdbcTemplate.queryForList("SELECT q.token,q.serial_no,q.school,q.campus,q.building,q.floor,q.location_no,q.location_label,f.facility_no,f.name AS facility_name " +
                     "FROM facility_qr_code q LEFT JOIN facility f ON f.id=q.facility_id " +
-                    "WHERE q.id IN (" + placeholders + ") AND q.status<>'DELETED' ORDER BY q.serial_no", args);
+                    "WHERE q.id IN (" + placeholders + ") AND q.status<>'DELETED' ORDER BY q.serial_no DESC", args);
         } else {
-            rows = jdbcTemplate.queryForList("SELECT q.token,q.serial_no,q.school,q.campus,q.building,q.floor,q.location_no,f.facility_no,f.name AS facility_name " +
+            String like = keyword == null ? "" : "%" + keyword.trim() + "%";
+            String statusSql = status == null || status.trim().isEmpty() ? "q.status<>'DELETED'" : "q.status=?";
+            String sql = "SELECT q.token,q.serial_no,q.school,q.campus,q.building,q.floor,q.location_no,q.location_label,f.facility_no,f.name AS facility_name " +
                     "FROM facility_qr_code q LEFT JOIN facility f ON f.id=q.facility_id " +
-                    "WHERE q.status<>'DELETED' AND (? IS NULL OR q.status=?) ORDER BY q.serial_no", status, status);
+                    "WHERE " + statusSql + " AND (?='' OR q.token LIKE ? OR f.facility_no LIKE ? OR f.name LIKE ? OR q.school LIKE ? OR q.campus LIKE ? OR q.building LIKE ? OR q.floor LIKE ? OR q.location_label LIKE ?) " +
+                    "ORDER BY q.serial_no DESC";
+            List<Object> args = new ArrayList<>();
+            if (status != null && !status.trim().isEmpty()) args.add(status);
+            for (int i = 0; i < 9; i++) args.add(like);
+            rows = jdbcTemplate.queryForList(sql, args.toArray());
         }
         if (rows.isEmpty()) throw new IllegalArgumentException("没有符合条件的二维码");
         List<PdfService.LabelData> labels = new ArrayList<>();
-        Map<String, Integer> floorCounters = new LinkedHashMap<>();
         for (Map<String, Object> row : rows) {
             String serial = String.valueOf(row.get("serial_no"));
             String location = joinLocation(row);
             String facility = row.get("facility_no") == null ? "" : String.valueOf(row.get("facility_name")) + "（" + row.get("facility_no") + "）";
-            String displayCode = labelDisplayCode(row, serial, floorCounters);
+            String displayCode = labelCode(row);
             labels.add(new PdfService.LabelData(String.valueOf(row.get("token")), serial, location, facility, displayCode));
         }
         byte[] pdf = pdfService.labelsPdf(labels);
         auditService.record(authentication != null ? authService.loadCurrentUser(authentication.getName()).getId() : null,
                 "QRCODE_LABEL_PDF", "FACILITY_QR_CODE", "labels", Collections.singletonMap("count", labels.size()));
         return pdfResponse(pdf, "qr-labels.pdf");
-    }
-
-    /** 介绍页 PDF：单页，可选附带入口码。 */
-    @GetMapping("/poster.pdf")
-    public ResponseEntity<byte[]> posterPdf(@RequestParam(required = false) String entryToken,
-                                            Authentication authentication) throws Exception {
-        requireAdmin(authentication);
-        byte[] pdf = pdfService.posterPdf(entryToken);
-        auditService.record(authentication != null ? authService.loadCurrentUser(authentication.getName()).getId() : null,
-                "QRCODE_POSTER_PDF", "FACILITY_QR_CODE", "poster", null);
-        return pdfResponse(pdf, "platform-poster.pdf");
     }
 
     private ResponseEntity<byte[]> pdfResponse(byte[] pdf, String filename) {
@@ -118,27 +120,12 @@ public class QrCodeController {
         return sb.toString();
     }
 
-    /** 标签编号：同一「校区+楼栋+楼层」内按打印顺序从 01 起连续编号，每次打印都重新从 01 开始 */
-    private String labelDisplayCode(Map<String, Object> row, String serial, Map<String, Integer> floorCounters) {
-        String building = value(row.get("building"));
-        String floor = value(row.get("floor"));
-        if (!building.isEmpty() && !floor.isEmpty()) {
-            String key = value(row.get("school")) + "|" + value(row.get("campus")) + "|" + building + "|" + floor;
-            int position = floorCounters.merge(key, 1, Integer::sum);
-            return "NO." + building + "-" + floor + "-" + String.format("%02d", position);
-        }
-        try {
-            return "NO." + String.format("%03d", Integer.parseInt(serial));
-        } catch (NumberFormatException ignored) {
-            return "NO." + serial;
-        }
-    }
-
     private String value(Object value) {
         return value == null ? "" : String.valueOf(value).trim();
     }
 
     @PostMapping("/batch")
+    @Transactional
     public ApiResponse<List<Map<String, Object>>> batch(@Valid @RequestBody BatchRequest request,
                                                         Authentication authentication) {
         AuthenticatedUser user = requireAdmin(authentication);
@@ -158,7 +145,7 @@ public class QrCodeController {
             for (int i = 1; i <= count; i++) {
                 String token = UUID.randomUUID().toString().replace("-", "");
                 jdbcTemplate.update("INSERT INTO facility_qr_code(token,serial_no,school) VALUES(?,?,?)", token, ++nextSerial, DEFAULT_SCHOOL);
-                created.add(row(token, nextSerial, DEFAULT_SCHOOL, null, null, null, null));
+                created.add(row(token, nextSerial, DEFAULT_SCHOOL, null, null, null, null, null));
             }
             total += count;
         }
@@ -168,7 +155,6 @@ public class QrCodeController {
     }
 
     private int[] generateGroup(BatchRequest.Group group, int startSerial, List<Map<String, Object>> created) {
-        int count = Math.max(1, Math.min(group.count, 500));
         String school = value(group.school);
         if (school.isEmpty()) school = DEFAULT_SCHOOL;
         String campus = group.campus == null ? "" : group.campus.trim();
@@ -176,6 +162,15 @@ public class QrCodeController {
         String floor = group.floor == null ? "" : group.floor.trim();
         if (campus.isEmpty() || building.isEmpty() || floor.isEmpty()) {
             throw new IllegalArgumentException("学校、校区、楼栋和楼层必须填写完整");
+        }
+        List<String> labels = normalizeLabels(group.labels);
+        int count;
+        if (labels.isEmpty()) {
+            if (group.count == null || group.count < 1) throw new IllegalArgumentException("请填写二维码数量或自定义标签名称");
+            count = Math.min(group.count, 500);
+        } else {
+            count = labels.size();
+            ensureLabelsAvailable(school, campus, building, floor, labels, null);
         }
         Integer currentMax = jdbcTemplate.queryForObject(
                 "SELECT COALESCE(MAX(location_no),0) FROM facility_qr_code WHERE school=? AND campus=? AND building=? AND floor=?",
@@ -185,14 +180,51 @@ public class QrCodeController {
         for (int i = 0; i < count; i++) {
             String token = UUID.randomUUID().toString().replace("-", "");
             int locationNo = floorBase + i;
-            jdbcTemplate.update("INSERT INTO facility_qr_code(token,serial_no,school,campus,building,floor,location_no) VALUES(?,?,?,?,?,?,?)",
-                    token, ++serial, school, campus, building, floor, locationNo);
-            created.add(row(token, serial, school, campus, building, floor, locationNo));
+            String locationLabel = labels.isEmpty() ? null : labels.get(i);
+            jdbcTemplate.update("INSERT INTO facility_qr_code(token,serial_no,school,campus,building,floor,location_no,location_label) VALUES(?,?,?,?,?,?,?,?)",
+                    token, ++serial, school, campus, building, floor, locationNo, locationLabel);
+            created.add(row(token, serial, school, campus, building, floor, locationNo, locationLabel));
         }
         return new int[]{count, serial};
     }
 
-    private Map<String, Object> row(String token, int serial, String school, String campus, String building, String floor, Integer locationNo) {
+    private List<String> normalizeLabels(List<String> labels) {
+        if (labels == null) return Collections.emptyList();
+        List<String> normalized = new ArrayList<>();
+        Set<String> unique = new HashSet<>();
+        for (String label : labels) {
+            String value = label == null ? "" : label.trim();
+            if (value.isEmpty()) continue;
+            if (value.length() > 120) throw new IllegalArgumentException("二维码名称不能超过 120 个字符");
+            if (!unique.add(value.toLowerCase(Locale.ROOT))) throw new IllegalArgumentException("同一楼层的二维码名称不能重复：" + value);
+            normalized.add(value);
+        }
+        if (normalized.size() > 500) throw new IllegalArgumentException("每层最多设置 500 个二维码名称");
+        return normalized;
+    }
+
+    private void ensureLabelsAvailable(String school, String campus, String building, String floor,
+                                       List<String> labels, Long excludedId) {
+        if (labels.isEmpty()) return;
+        String placeholders = String.join(",", Collections.nCopies(labels.size(), "?"));
+        String sql = "SELECT COUNT(*) FROM facility_qr_code WHERE school=? AND campus=? AND building=? AND floor=? " +
+                "AND status<>'DELETED' AND location_label IN (" + placeholders + ")";
+        List<Object> args = new ArrayList<>();
+        args.add(school);
+        args.add(campus);
+        args.add(building);
+        args.add(floor);
+        args.addAll(labels);
+        if (excludedId != null) {
+            sql += " AND id<>?";
+            args.add(excludedId);
+        }
+        Integer existing = jdbcTemplate.queryForObject(sql, Integer.class, args.toArray());
+        if (existing != null && existing > 0) throw new IllegalArgumentException("该楼层已存在同名二维码，请更换名称");
+    }
+
+    private Map<String, Object> row(String token, int serial, String school, String campus, String building, String floor,
+                                    Integer locationNo, String locationLabel) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("token", token);
         row.put("serialNo", serial);
@@ -201,6 +233,7 @@ public class QrCodeController {
         row.put("building", building);
         row.put("floor", floor);
         row.put("locationNo", locationNo);
+        row.put("locationLabel", locationLabel);
         row.put("status", "UNCLAIMED");
         return row;
     }
@@ -212,14 +245,14 @@ public class QrCodeController {
         requireAdmin(authentication);
         String like = keyword == null ? "" : "%" + keyword + "%";
         String statusSql = status == null ? "q.status<>'DELETED'" : "q.status=?";
-        String sql = "SELECT q.id,q.token,q.serial_no,q.school,q.campus,q.building,q.floor,q.location_no,q.status,q.created_at,q.bound_at,q.deleted_at," +
+        String sql = "SELECT q.id,q.token,q.serial_no,q.school,q.campus,q.building,q.floor,q.location_no,q.location_label,q.status,q.created_at,q.bound_at,q.deleted_at," +
                 "q.facility_id,f.facility_no,f.name AS facility_name " +
                 "FROM facility_qr_code q LEFT JOIN facility f ON f.id=q.facility_id " +
-                "WHERE " + statusSql + " AND (?='' OR q.token LIKE ? OR f.facility_no LIKE ? OR f.name LIKE ? OR q.school LIKE ? OR q.campus LIKE ? OR q.building LIKE ? OR q.floor LIKE ?) " +
+                "WHERE " + statusSql + " AND (?='' OR q.token LIKE ? OR f.facility_no LIKE ? OR f.name LIKE ? OR q.school LIKE ? OR q.campus LIKE ? OR q.building LIKE ? OR q.floor LIKE ? OR q.location_label LIKE ?) " +
                 "ORDER BY q.serial_no DESC";
         List<Object> args = new ArrayList<>();
         if (status != null) args.add(status);
-        for (int i = 0; i < 8; i++) args.add(like);
+        for (int i = 0; i < 9; i++) args.add(like);
         return ApiResponse.success(jdbcTemplate.queryForList(sql, args.toArray()));
     }
 
@@ -232,6 +265,25 @@ public class QrCodeController {
         softDelete(qr);
         auditService.record(user.getId(), "QRCODE_DELETE", "FACILITY_QR_CODE", String.valueOf(id), qrDetails(qr));
         return ApiResponse.success(Collections.singletonMap("deleted", true));
+    }
+
+    @PutMapping("/{id}/label")
+    @Transactional
+    public ApiResponse<Map<String, Object>> updateLabel(@PathVariable long id,
+                                                         @Valid @RequestBody LabelRequest request,
+                                                         Authentication authentication) {
+        AuthenticatedUser user = requireAdmin(authentication);
+        Map<String, Object> qr = findQr(id);
+        if ("DELETED".equals(String.valueOf(qr.get("status")))) throw new IllegalArgumentException("请先恢复已删除的二维码再修改名称");
+        String label = request.label.trim();
+        ensureLabelsAvailable(value(qr.get("school")), value(qr.get("campus")), value(qr.get("building")),
+                value(qr.get("floor")), Collections.singletonList(label), id);
+        jdbcTemplate.update("UPDATE facility_qr_code SET location_label=? WHERE id=?", label, id);
+        Map<String, Object> details = qrDetails(qr);
+        details.put("newLocationLabel", label);
+        auditService.record(user.getId(), "QRCODE_LABEL_UPDATE", "FACILITY_QR_CODE", String.valueOf(id), details);
+        return ApiResponse.success(jdbcTemplate.queryForMap(
+                "SELECT id,token,serial_no,school,campus,building,floor,location_no,location_label,status FROM facility_qr_code WHERE id=?", id));
     }
 
     @PostMapping("/batch-delete")
@@ -267,7 +319,7 @@ public class QrCodeController {
         jdbcTemplate.update("UPDATE facility_qr_code SET status='UNCLAIMED',deleted_at=NULL WHERE id=?", id);
         auditService.record(user.getId(), "QRCODE_RESTORE", "FACILITY_QR_CODE", String.valueOf(id), qrDetails(qr));
         return ApiResponse.success(jdbcTemplate.queryForMap(
-                "SELECT id,token,status,school,campus,building,floor,location_no FROM facility_qr_code WHERE id=?", id));
+                "SELECT id,token,status,school,campus,building,floor,location_no,location_label FROM facility_qr_code WHERE id=?", id));
     }
 
     private void softDelete(Map<String, Object> qr) {
@@ -316,14 +368,14 @@ public class QrCodeController {
 
     private Map<String, Object> findQr(long id) {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT id,token,serial_no,school,campus,building,floor,location_no,status,facility_id,deleted_at FROM facility_qr_code WHERE id=?", id);
+                "SELECT id,token,serial_no,school,campus,building,floor,location_no,location_label,status,facility_id,deleted_at FROM facility_qr_code WHERE id=?", id);
         if (rows.isEmpty()) throw new IllegalArgumentException("二维码不存在");
         return rows.get(0);
     }
 
     private Map<String, Object> qrDetails(Map<String, Object> qr) {
         Map<String, Object> details = new LinkedHashMap<>();
-        for (String key : new String[]{"serial_no", "school", "campus", "building", "floor", "location_no", "status", "facility_id"}) {
+        for (String key : new String[]{"serial_no", "school", "campus", "building", "floor", "location_no", "location_label", "status", "facility_id"}) {
             details.put(key, qr.get(key));
         }
         return details;
@@ -333,7 +385,7 @@ public class QrCodeController {
     public ApiResponse<Map<String, Object>> resolve(@PathVariable String token) {
         Map<String, Object> result = new LinkedHashMap<>();
         List<Map<String, Object>> pool = jdbcTemplate.queryForList(
-                "SELECT serial_no,school,campus,building,floor,location_no,status,facility_id FROM facility_qr_code WHERE token=?", token);
+                "SELECT serial_no,school,campus,building,floor,location_no,location_label,status,facility_id FROM facility_qr_code WHERE token=?", token);
         if (!pool.isEmpty()) {
             Map<String, Object> qr = pool.get(0);
             String status = String.valueOf(qr.get("status"));
@@ -350,6 +402,8 @@ public class QrCodeController {
                 result.put("building", qr.get("building"));
                 result.put("floor", qr.get("floor"));
                 result.put("locationNo", qr.get("location_no"));
+                result.put("locationLabel", qr.get("location_label"));
+                result.put("labelCode", labelCode(qr));
                 return ApiResponse.success(result);
             }
             if ("BOUND".equals(status) && qr.get("facility_id") != null) {
@@ -382,6 +436,23 @@ public class QrCodeController {
         return user;
     }
 
+    /** 采集员扫码建档用：优先使用管理员设置的名称，旧二维码继续使用楼栋-楼层-序号。 */
+    private String labelCode(Map<String, Object> qr) {
+        String customLabel = value(qr.get("location_label"));
+        if (!customLabel.isEmpty()) return customLabel;
+        String building = value(qr.get("building"));
+        String floor = value(qr.get("floor"));
+        Object serial = qr.get("serial_no");
+        if (building.isEmpty() || floor.isEmpty() || serial == null) {
+            return "NO." + (serial == null ? "?" : serial);
+        }
+        Integer rank = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*)+1 FROM facility_qr_code WHERE school=? AND campus=? AND building=? AND floor=? " +
+                        "AND status<>'DELETED' AND serial_no<?",
+                Integer.class, qr.get("school"), qr.get("campus"), building, floor, serial);
+        return "NO." + building + "-" + floor + "-" + String.format("%02d", rank == null ? 1 : rank);
+    }
+
     public static class BatchRequest {
         @Min(value = 1, message = "每次至少生成 1 个")
         @Max(value = 500, message = "每次最多生成 500 个")
@@ -400,12 +471,20 @@ public class QrCodeController {
             @Max(value = 500, message = "每层最多生成 500 个")
             public Integer count;
             public Integer startNo;
+            /** 自定义名称列表，例如：东、东楼梯口、西。为空时兼容旧版数量+序号生成。 */
+            public List<String> labels;
         }
     }
 
     public static class RebindRequest {
         @NotNull(message = "请选择需要绑定的设施")
         public Long facilityId;
+    }
+
+    public static class LabelRequest {
+        @NotBlank(message = "请输入二维码名称")
+        @Size(max = 120, message = "二维码名称不能超过 120 个字符")
+        public String label;
     }
 
     public static class BatchDeleteRequest {

@@ -62,17 +62,20 @@ export const api = {
     method: 'POST', body: JSON.stringify({ ids }),
   }),
   restoreQrCode: (id) => request(`/qr-codes/${id}/restore`, { method: 'POST' }),
+  updateQrLabel: (id, label) => request(`/qr-codes/${id}/label`, {
+    method: 'PUT', body: JSON.stringify({ label }),
+  }),
   rebindQrCode: (id, facilityId) => request(`/qr-codes/${id}/rebind`, {
     method: 'POST', body: JSON.stringify({ facilityId }),
   }),
-  downloadQrLabelsPdf: (status = '', ids = []) => {
+  downloadQrLabelsPdf: (status = '', ids = [], keyword = '') => {
     const params = []
     if (status) params.push(`status=${status}`)
     if (ids.length) params.push(`ids=${ids.join(',')}`)
+    if (keyword) params.push(`keyword=${encodeURIComponent(keyword)}`)
     const qs = params.length ? `?${params.join('&')}` : ''
     return openPdf(`/qr-codes/labels.pdf${qs}`, 'qr-labels.pdf')
   },
-  downloadQrPosterPdf: () => openPdf('/qr-codes/poster.pdf', 'platform-poster.pdf'),
   facilityHistory: (id) => request(`/facility-operations/${id}/history`),
   changeFacilityLifecycle: (id, eventType, note) => request(`/facility-operations/${id}/lifecycle`, { method: 'POST', body: JSON.stringify({ eventType, note }) }),
   maintenanceRecords: (facilityId) => request(`/maintenance-records${facilityId ? `?facilityId=${facilityId}` : ''}`),
@@ -104,14 +107,21 @@ export const api = {
     const qs = params.length ? `?${params.join('&')}` : ''
     return request(`/inspection-tasks${qs}`)
   },
-  inspectionRecords: (facilityNo = '') => request(`/inspection/records${facilityNo ? `?facilityNo=${encodeURIComponent(facilityNo)}` : ''}`),
+  inspectionRecords: (facilityNo = '', inspector = '') => {
+    const params = []
+    if (facilityNo) params.push(`facilityNo=${encodeURIComponent(facilityNo)}`)
+    if (inspector) params.push(`inspector=${encodeURIComponent(inspector)}`)
+    const qs = params.length ? `?${params.join('&')}` : ''
+    return request(`/inspection/records${qs}`)
+  },
+  inspectionRecordPhotos: (id) => request(`/inspection/records/${id}/photos`),
+  inspectionPhotoFileUrl: (photoId) => `${API_BASE}/inspection/photos/${photoId}/file`,
   inspectionPlans: () => request('/inspection-plans'),
   createPlan: (plan) => request('/inspection-plans', { method: 'POST', body: JSON.stringify(plan) }),
   updatePlan: (id, plan) => request(`/inspection-plans/${id}`, { method: 'PUT', body: JSON.stringify(plan) }),
   deletePlan: (id) => request(`/inspection-plans/${id}`, { method: 'DELETE' }),
   updateInspectionTask: (id, task) => request(`/inspection-tasks/${id}`, { method: 'PUT', body: JSON.stringify(task) }),
   deleteInspectionTask: (id) => request(`/inspection-tasks/${id}`, { method: 'DELETE' }),
-  inspectionRecords: (facilityNo = '') => request(`/inspection/records${facilityNo ? `?facilityNo=${encodeURIComponent(facilityNo)}` : ''}`),
   voidInspectionRecord: (id, reason) => request(`/inspection/records/${id}/void`, { method: 'POST', body: JSON.stringify({ reason }) }),
   generateTasks: (id, dueDate) => request(`/inspection-plans/${id}/generate-tasks?dueDate=${dueDate}`, { method: 'POST' }),
   rectificationList: (status = '') => request(`/rectifications${status ? `?status=${status}` : ''}`),

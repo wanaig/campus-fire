@@ -220,6 +220,7 @@ function QrCodePage() {
   const [items, setItems] = useState([])
   const [status, setStatus] = useState('')
   const [keyword, setKeyword] = useState('')
+  const [appliedKeyword, setAppliedKeyword] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -227,16 +228,20 @@ function QrCodePage() {
   const [school, setSchool] = useState(QR_BRAND_TITLE)
   const [campus, setCampus] = useState('')
   const [building, setBuilding] = useState('')
-  const [floors, setFloors] = useState([{ floor: '', count: '4' }])
+  const [floors, setFloors] = useState([{ floor: '', labelsText: '' }])
   const [rebindItem, setRebindItem] = useState(null)
   const [rebindFacilityId, setRebindFacilityId] = useState('')
+  const [renameItem, setRenameItem] = useState(null)
+  const [renameValue, setRenameValue] = useState('')
   const [facilityOptions, setFacilityOptions] = useState([])
   const [selectedIds, setSelectedIds] = useState([])
 
   async function load() {
     setLoading(true); setError('')
     try {
-      setItems(await api.qrCodes(status, keyword))
+      const normalizedKeyword = keyword.trim()
+      setItems(await api.qrCodes(status, normalizedKeyword))
+      setAppliedKeyword(normalizedKeyword)
       setSelectedIds([])
     } catch (cause) { setError(cause.message) } finally { setLoading(false) }
   }
@@ -246,29 +251,37 @@ function QrCodePage() {
     setFloors(prev => prev.map((row, i) => i === index ? { ...row, [key]: value } : row))
   }
 
+  function parseLabels(text) {
+    return String(text || '').split(/[\n,，、;；]+/).map(value => value.trim()).filter(Boolean)
+  }
+
   async function generate() {
     setError(''); setSuccess('')
     const groups = floors
-      .map(row => ({ floor: row.floor.trim(), count: Number(row.count) }))
-      .filter(row => row.floor && row.count > 0)
+      .map(row => ({ floor: row.floor.trim(), labels: parseLabels(row.labelsText) }))
+      .filter(row => row.floor && row.labels.length)
     if (!school.trim() || !campus.trim() || !building.trim()) return setError('请填写学校、校区和楼栋')
-    if (!groups.length) return setError('请至少为一个楼层填写楼层名称和数量')
-    if (groups.some(g => !Number.isInteger(g.count) || g.count < 1 || g.count > 500)) return setError('每层数量需为 1-500 的整数')
-    let created
+    if (!groups.length) return setError('请至少为一个楼层填写楼层名称和二维码名称')
+    if (groups.some(g => g.labels.length > 500)) return setError('每层最多设置 500 个二维码名称')
+    if (groups.some(g => g.labels.some(label => label.length > 120))) return setError('二维码名称不能超过 120 个字符')
+    if (groups.some(g => new Set(g.labels.map(label => label.toLocaleLowerCase())).size !== g.labels.length)) return setError('同一楼层的二维码名称不能重复')
     setBusy(true)
     try {
-      created = await api.createQrBatch({
-        groups: groups.map(g => ({ school: school.trim(), campus: campus.trim(), building: building.trim(), floor: g.floor, count: g.count })),
+      const created = await api.createQrBatch({
+        groups: groups.map(g => ({ school: school.trim(), campus: campus.trim(), building: building.trim(), floor: g.floor, labels: g.labels })),
       })
-    } catch (cause) { return setError(cause.message) } finally { setBusy(false) }
-    await load()
-    setSuccess(`已生成 ${created.length} 个二维码，PDF 已开始下载`)
-    downloadLabels('UNCLAIMED')
+      const createdTokens = new Set(created.map(item => item.token))
+      const createdIds = (await api.qrCodes('UNCLAIMED')).filter(item => createdTokens.has(item.token)).map(item => item.id)
+      if (createdIds.length !== created.length) throw new Error('新生成二维码读取不完整，请刷新后重新下载')
+      await api.downloadQrLabelsPdf('', createdIds)
+      await load()
+      setSuccess(`已生成 ${created.length} 个二维码，并下载 ${created.length} 页标签 PDF`)
+    } catch (cause) { setError(cause.message) } finally { setBusy(false) }
   }
 
   function hierarchyParts(item) {
-    const number = item.location_no == null ? null : `第${String(item.location_no).padStart(2, '0')}号`
-    return [item.school, item.campus, item.building, item.floor, number].filter(Boolean)
+    const label = item.location_label || (item.location_no == null ? null : `第${String(item.location_no).padStart(2, '0')}号`)
+    return [item.school, item.campus, item.building, item.floor, label].filter(Boolean)
   }
 
   async function openRebind(item) {
@@ -333,25 +346,37 @@ function QrCodePage() {
   const selectableIds = items.filter(item => item.status !== 'DELETED').map(item => item.id)
   const allSelected = selectableIds.length > 0 && selectableIds.every(id => selectedIds.includes(id))
 
-  async function downloadLabels(labelStatus) {
+  async function downloadLabels() {
     setError('')
     setBusy(true)
     try {
-      await api.downloadQrLabelsPdf(labelStatus)
+      await api.downloadQrLabelsPdf(status, [], appliedKeyword)
     } catch (cause) { setError(cause.message) } finally { setBusy(false) }
   }
 
-  async function downloadPoster() {
-    setError('')
-    setBusy(true)
+  function openRename(item) {
+    setError(''); setSuccess('')
+    setRenameItem(item)
+    setRenameValue(item.location_label || '')
+  }
+
+  async function submitRename() {
+    const label = renameValue.trim()
+    if (!label) return setError('请输入二维码名称')
+    if (label.length > 120) return setError('二维码名称不能超过 120 个字符')
+    setBusy(true); setError(''); setSuccess('')
     try {
-      await api.downloadQrPosterPdf()
+      await api.updateQrLabel(renameItem.id, label)
+      setRenameItem(null)
+      setRenameValue('')
+      setSuccess(`二维码名称已修改为“${label}”`)
+      await load()
     } catch (cause) { setError(cause.message) } finally { setBusy(false) }
   }
 
   return <section className="work-page">
     <article className="panel" style={{ marginBottom: 16 }}>
-      <div className="panel-head"><div><h2>分级生成二维码</h2><p>按“学校 → 校区 → 楼栋 → 楼层 → 编号”生成，每个楼层自动连续编号</p></div></div>
+      <div className="panel-head"><div><h2>分级生成二维码</h2><p>按“学校 → 校区 → 楼栋 → 楼层 → 自定义名称”生成，名称可填写东、西、东楼梯口等现场位置</p></div></div>
       <div className="qr-gen-form">
         <div className="qr-gen-head">
           <div className="field"><Label required>学校</Label><Input value={school} onChange={(_, d) => setSchool(d.value)} placeholder="例如 湖南科技职业学院" /></div>
@@ -361,22 +386,21 @@ function QrCodePage() {
         <div className="qr-gen-rows">
           {floors.map((row, index) => <div key={index} className="qr-gen-row">
             <div className="field"><Label required>楼层</Label><Input value={row.floor} onChange={(_, d) => setFloorRow(index, 'floor', d.value)} placeholder="例如 2层" /></div>
-            <div className="field"><Label required>数量</Label><Input type="number" min="1" max="500" value={row.count} onChange={(_, d) => setFloorRow(index, 'count', d.value)} /></div>
+            <div className="field qr-label-names-field"><Label required>二维码名称</Label><Textarea value={row.labelsText} onChange={(_, d) => setFloorRow(index, 'labelsText', d.value)} placeholder="例如 东、东楼梯口、西、西楼梯口、中" resize="vertical" /><span className="field-hint">多个名称用逗号或换行分隔，已识别 {parseLabels(row.labelsText).length} 个</span></div>
             <Button appearance="subtle" disabled={floors.length === 1} onClick={() => setFloors(prev => prev.filter((_, i) => i !== index))}>删除</Button>
           </div>)}
         </div>
         <div className="qr-gen-actions">
-          <Button appearance="secondary" icon={<Add24Regular />} onClick={() => setFloors(prev => [...prev, { floor: '', count: '4' }])}>添加楼层</Button>
+          <Button appearance="secondary" icon={<Add24Regular />} onClick={() => setFloors(prev => [...prev, { floor: '', labelsText: '' }])}>添加楼层</Button>
           <Button appearance="primary" disabled={busy} onClick={generate}>{busy ? '正在处理…' : '生成并下载标签 PDF'}</Button>
         </div>
       </div>
       {success && <MessageBar intent="success" style={{ marginTop: 12 }}><MessageBarBody>{success}</MessageBarBody></MessageBar>}
     </article>
     <div className="work-toolbar">
-      <Input size="large" value={keyword} onChange={(_, d) => setKeyword(d.value)} placeholder="输入码值/位置/绑定设施查询" style={{ maxWidth: 280 }} />
+      <Input size="large" value={keyword} onChange={(_, d) => setKeyword(d.value)} placeholder="输入二维码名称、位置、码值或绑定设施" style={{ maxWidth: 320 }} />
       <Button appearance="primary" onClick={() => load()}>查询</Button>
-      <Button icon={<Print24Regular />} appearance="secondary" disabled={busy || status === 'DELETED'} onClick={() => downloadLabels(status)}>下载标签 PDF（当前筛选）</Button>
-      <Button icon={<Print24Regular />} appearance="secondary" disabled={busy} onClick={() => downloadPoster()}>下载平台介绍页 PDF</Button>
+      <Button icon={<Print24Regular />} appearance="secondary" disabled={busy || loading || !items.length || status === 'DELETED'} onClick={downloadLabels}>下载二维码标签 PDF（当前筛选）</Button>
     </div>
     {error && <MessageBar intent="error"><MessageBarBody>{error}</MessageBarBody></MessageBar>}
     <article className="panel data-panel">
@@ -387,7 +411,7 @@ function QrCodePage() {
         {status !== 'DELETED' && <Button appearance="secondary" disabled={busy || !selectedIds.length} onClick={batchDeleteQr}>批量删除（{selectedIds.length}）</Button>}
       </div>
       {loading ? <Spinner label="正在读取二维码" /> : items.length ? <div className="table-wrap"><table>
-        <thead><tr><th className="select-cell"><input type="checkbox" aria-label="选择当前筛选全部二维码" disabled={!selectableIds.length || status === 'DELETED'} checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : selectableIds)} /></th><th>全局序号</th><th>分级位置</th><th>码值</th><th>状态</th><th>绑定设施</th><th>时间</th><th>操作</th></tr></thead>
+        <thead><tr><th className="select-cell"><input type="checkbox" aria-label="选择当前筛选全部二维码" disabled={!selectableIds.length || status === 'DELETED'} checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : selectableIds)} /></th><th>系统序号</th><th>分级位置 / 自定义名称</th><th>码值</th><th>状态</th><th>绑定设施</th><th>时间</th><th>操作</th></tr></thead>
         <tbody>{items.map(item => <tr key={item.id}>
           <td className="select-cell"><input type="checkbox" aria-label={`选择 NO.${String(item.serial_no).padStart(3, '0')}`} disabled={item.status === 'DELETED'} checked={selectedIds.includes(item.id)} onChange={() => toggleSelected(item.id)} /></td>
           <td><strong>NO.{String(item.serial_no).padStart(3, '0')}</strong></td>
@@ -398,6 +422,7 @@ function QrCodePage() {
           <td><span>{String(item.created_at).slice(0, 19).replace('T', ' ')}{item.deleted_at && <small>删除：{String(item.deleted_at).slice(0, 19).replace('T', ' ')}</small>}</span></td>
           <td><span className="row-actions">
             {item.status === 'DELETED' ? <Button size="small" appearance="primary" disabled={busy} onClick={() => restoreQr(item)}>恢复</Button> : <>
+              <Button size="small" disabled={busy} onClick={() => openRename(item)}>修改名称</Button>
               <Button size="small" disabled={busy} onClick={() => openRebind(item)}>重新绑定</Button>
               <Button size="small" className="btn-danger" disabled={busy} onClick={() => deleteQr(item)}>删除</Button>
             </>}
@@ -405,7 +430,7 @@ function QrCodePage() {
         </tr>)}</tbody>
       </table></div> : <Empty>还没有二维码，先在上方生成一批</Empty>}
     </article>
-    <p className="muted-note">使用流程：按学校、校区、楼栋和楼层生成标签 → 打印张贴 → 采集员扫码建档。重新绑定会保留二维码本身并转移到所选设施；删除后原标签立即失效。</p>
+    <p className="muted-note">使用流程：填写楼层和各二维码的自定义名称 → 生成并打印标签 → 采集员扫码建档。已生成二维码可单独修改名称；重新绑定会保留二维码本身并转移到所选设施。</p>
     {rebindItem && createPortal(<FluentProvider theme={webLightTheme}><div className="dialog-backdrop" role="presentation">
       <div className="resolve-dialog" role="dialog" aria-modal="true" aria-labelledby="qr-rebind-title">
         <div><h2 id="qr-rebind-title">重新绑定二维码</h2><p>{hierarchyParts(rebindItem).join(' / ') || `NO.${String(rebindItem.serial_no).padStart(3, '0')}`}</p></div>
@@ -418,6 +443,16 @@ function QrCodePage() {
         <div className="dialog-actions">
           <Button appearance="secondary" disabled={busy} onClick={() => setRebindItem(null)}>取消</Button>
           <Button appearance="primary" disabled={busy || !rebindFacilityId} onClick={submitRebind}>{busy ? '正在绑定…' : '确认重新绑定'}</Button>
+        </div>
+      </div>
+    </div></FluentProvider>, document.body)}
+    {renameItem && createPortal(<FluentProvider theme={webLightTheme}><div className="dialog-backdrop" role="presentation">
+      <div className="resolve-dialog" role="dialog" aria-modal="true" aria-labelledby="qr-rename-title">
+        <div><h2 id="qr-rename-title">修改二维码名称</h2><p>{[renameItem.school, renameItem.campus, renameItem.building, renameItem.floor].filter(Boolean).join(' / ')}</p></div>
+        <div className="field"><Label htmlFor="qr-label-name" required>自定义名称</Label><Input id="qr-label-name" value={renameValue} onChange={(_, d) => setRenameValue(d.value)} placeholder="例如 东楼梯口" maxLength={120} /></div>
+        <div className="dialog-actions">
+          <Button appearance="secondary" disabled={busy} onClick={() => { setRenameItem(null); setRenameValue('') }}>取消</Button>
+          <Button appearance="primary" disabled={busy || !renameValue.trim()} onClick={submitRename}>{busy ? '正在保存…' : '保存名称'}</Button>
         </div>
       </div>
     </div></FluentProvider>, document.body)}
@@ -543,14 +578,16 @@ function FacilityPage() {
 
 function InspectionRecordsPage() {
   const [keyword, setKeyword] = useState('')
+  const [inspector, setInspector] = useState('')
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [voiding, setVoiding] = useState(null)
   const [voidReason, setVoidReason] = useState('')
-  async function load(value = keyword) {
+  const [photoView, setPhotoView] = useState(null)
+  async function load(value = keyword, inspectorName = inspector) {
     setLoading(true); setError('')
-    try { setItems(await api.inspectionRecords(value.trim())) } catch (cause) { setError(cause.message) } finally { setLoading(false) }
+    try { setItems(await api.inspectionRecords(value.trim(), inspectorName.trim())) } catch (cause) { setError(cause.message) } finally { setLoading(false) }
   }
   useEffect(() => { load('') }, [])
   async function confirmVoid() {
@@ -560,6 +597,28 @@ function InspectionRecordsPage() {
       setVoiding(null); setVoidReason(''); load()
     } catch (cause) { setError(cause.message) }
   }
+  async function openPhotos(record) {
+    setPhotoView({ record, photos: [], error: '' })
+    try {
+      const list = await api.inspectionRecordPhotos(record.id)
+      const token = localStorage.getItem('campus-fire-token')
+      const loaded = []
+      for (const photo of list) {
+        try {
+          const response = await fetch(api.inspectionPhotoFileUrl(photo.photoId), { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+          if (!response.ok) continue
+          loaded.push({ photoId: photo.photoId, url: URL.createObjectURL(await response.blob()) })
+        } catch (_) {}
+      }
+      setPhotoView({ record, photos: loaded, error: loaded.length ? '' : '未找到现场照片文件' })
+    } catch (cause) {
+      setPhotoView({ record, photos: [], error: cause.message })
+    }
+  }
+  function closePhotos() {
+    if (photoView) photoView.photos.forEach(photo => URL.revokeObjectURL(photo.url))
+    setPhotoView(null)
+  }
   async function exportCsv() {
     const token = localStorage.getItem('campus-fire-token')
     const response = await fetch(api.inspectionRecordsExportUrl(), { headers: token ? { Authorization: `Bearer ${token}` } : {} })
@@ -568,7 +627,8 @@ function InspectionRecordsPage() {
   }
   return <section className="work-page">
     <div className="work-toolbar">
-      <Input size="large" value={keyword} onChange={(_, d) => setKeyword(d.value)} placeholder="输入设施编号查询正式巡检记录" />
+      <Input size="large" value={keyword} onChange={(_, d) => setKeyword(d.value)} placeholder="输入设施编号查询" />
+      <Input size="large" value={inspector} onChange={(_, d) => setInspector(d.value)} placeholder="输入巡检人员姓名筛选" />
       <Button appearance="primary" onClick={() => load()}>查询</Button>
       <Button appearance="secondary" onClick={exportCsv}>导出 CSV</Button>
     </div>
@@ -590,7 +650,7 @@ function InspectionRecordsPage() {
             <td>{[item.campus, item.building, item.floor, item.area].filter(Boolean).join(' / ') || '—'}</td>
             <td>{item.inspector || '—'}</td>
             <td>{item.submitted_at ? String(item.submitted_at).replace('T', ' ').slice(0, 16) : '—'}</td>
-            <td>{Number(item.photo_count) || 0} 张</td>
+            <td>{Number(item.photo_count) ? <span className="photo-link" onClick={() => openPhotos(item)}>{item.photo_count} 张 · 查看</span> : '0 张'}</td>
             <td><span className={`badge ${item.void_reason ? 'warn' : abnormal.length ? 'warn' : 'ok'}`}>{item.void_reason ? '已作废' : abnormal.length ? `异常 ${abnormal.length} 项` : '全部正常'}</span>
               {results.length > 0 && <div className="result-chips">{results.map(result => <span key={result.code} className={`result-chip ${String(result.status).toUpperCase() === 'FAIL' ? 'fail' : ''}`}>{String(result.status).toUpperCase() === 'FAIL' ? '✗' : '✓'} {result.name}</span>)}</div>}
             </td>
@@ -605,6 +665,15 @@ function InspectionRecordsPage() {
       <p>{voiding.name}（{voiding.facility_no}），提交于 {String(voiding.submitted_at).replace('T', ' ').slice(0, 16)}。作废后将保留更正记录，不会物理删除。</p>
       <Textarea resize="vertical" value={voidReason} onChange={(_, d) => setVoidReason(d.value)} placeholder="请填写作废原因，例如：重复提交、内容录入错误" />
       <div className="dialog-actions"><Button appearance="secondary" onClick={() => setVoiding(null)}>取消</Button><Button appearance="primary" onClick={confirmVoid}>确认作废</Button></div>
+    </div></div></FluentProvider>, document.body)}
+    {photoView && createPortal(<FluentProvider theme={webLightTheme}><div className="dialog-backdrop" role="presentation" onClick={closePhotos}><div className="resolve-dialog photo-dialog" role="dialog" aria-modal="true" aria-labelledby="photo-title" onClick={event => event.stopPropagation()}>
+      <h2 id="photo-title">现场照片 · {photoView.record.name}（{photoView.record.facility_no}）</h2>
+      <p>巡检人：{photoView.record.inspector || '—'} · 提交于 {String(photoView.record.submitted_at || '').replace('T', ' ').slice(0, 16)}</p>
+      {photoView.error && <MessageBar intent="warning"><MessageBarBody>{photoView.error}</MessageBarBody></MessageBar>}
+      <div className="photo-grid">
+        {photoView.photos.map(photo => <img key={photo.photoId} src={photo.url} alt="巡检现场照片" className="photo-preview" />)}
+      </div>
+      <div className="dialog-actions"><Button appearance="secondary" onClick={closePhotos}>关闭</Button></div>
     </div></div></FluentProvider>, document.body)}
   </section>
 }
@@ -773,7 +842,7 @@ function InspectionPlanPanel({ users, types, userMap, typeMap }) {
     } catch (cause) { setError(cause.message) } finally { setSubmitting(false) }
   }
   async function removePlan(plan) {
-    if (!window.confirm(`确定删除巡检计划「${plan.plan_name}」吗？已生成任务的计划无法删除。`)) return
+    if (!window.confirm(`确定删除巡检计划「${plan.plan_name}」吗？删除后不再显示；已生成的巡检任务和巡检记录会保留。`)) return
     try { await api.deletePlan(plan.id); load() } catch (cause) { setError(cause.message) }
   }
   async function generate() {
