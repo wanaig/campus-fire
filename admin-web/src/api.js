@@ -65,9 +65,7 @@ export const api = {
   updateQrLabel: (id, label) => request(`/qr-codes/${id}/label`, {
     method: 'PUT', body: JSON.stringify({ label }),
   }),
-  rebindQrCode: (id, facilityId) => request(`/qr-codes/${id}/rebind`, {
-    method: 'POST', body: JSON.stringify({ facilityId }),
-  }),
+  unbindQrCode: (id) => request(`/qr-codes/${id}/unbind`, { method: 'POST' }),
   downloadQrLabelsPdf: (status = '', ids = [], keyword = '') => {
     const params = []
     if (status) params.push(`status=${status}`)

@@ -228,12 +228,11 @@ function QrCodePage() {
   const [school, setSchool] = useState(QR_BRAND_TITLE)
   const [campus, setCampus] = useState('')
   const [building, setBuilding] = useState('')
-  const [floors, setFloors] = useState([{ floor: '', labelsText: '' }])
-  const [rebindItem, setRebindItem] = useState(null)
-  const [rebindFacilityId, setRebindFacilityId] = useState('')
+  const [commonFloorsText, setCommonFloorsText] = useState('')
+  const [commonLabelsText, setCommonLabelsText] = useState('')
+  const [specialFloors, setSpecialFloors] = useState([{ floor: '', labelsText: '' }])
   const [renameItem, setRenameItem] = useState(null)
   const [renameValue, setRenameValue] = useState('')
-  const [facilityOptions, setFacilityOptions] = useState([])
   const [selectedIds, setSelectedIds] = useState([])
 
   async function load() {
@@ -247,29 +246,78 @@ function QrCodePage() {
   }
   useEffect(() => { load() }, [status])
 
-  function setFloorRow(index, key, value) {
-    setFloors(prev => prev.map((row, i) => i === index ? { ...row, [key]: value } : row))
+  function setSpecialRow(index, key, value) {
+    setSpecialFloors(prev => prev.map((row, i) => i === index ? { ...row, [key]: value } : row))
   }
 
   function parseLabels(text) {
     return String(text || '').split(/[\n,，、;；]+/).map(value => value.trim()).filter(Boolean)
   }
 
+  /** 解析楼层列表：支持「1层、2层、B1」与「1-6」连续楼层简写，返回 null 表示格式非法。 */
+  function parseFloors(text) {
+    const entries = String(text || '').split(/[\n,，、;；]+/).map(value => value.trim()).filter(Boolean)
+    const floors = []
+    for (const entry of entries) {
+      const range = entry.match(/^([+-]?\d+)\s*[-~～]\s*([+-]?\d+)$/)
+      if (range) {
+        const start = Number(range[1])
+        const end = Number(range[2])
+        if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start || end - start >= 100) return null
+        for (let i = start; i <= end; i++) floors.push(`${i}层`)
+      } else {
+        floors.push(/层$/.test(entry) ? entry : `${entry}层`)
+      }
+    }
+    return [...new Set(floors)]
+  }
+
   async function generate() {
     setError(''); setSuccess('')
-    const groups = floors
-      .map(row => ({ floor: row.floor.trim(), labels: parseLabels(row.labelsText) }))
-      .filter(row => row.floor && row.labels.length)
     if (!school.trim() || !campus.trim() || !building.trim()) return setError('请填写学校、校区和楼栋')
-    if (!groups.length) return setError('请至少为一个楼层填写楼层名称和二维码名称')
-    if (groups.some(g => g.labels.length > 500)) return setError('每层最多设置 500 个二维码名称')
-    if (groups.some(g => g.labels.some(label => label.length > 120))) return setError('二维码名称不能超过 120 个字符')
-    if (groups.some(g => new Set(g.labels.map(label => label.toLocaleLowerCase())).size !== g.labels.length)) return setError('同一楼层的二维码名称不能重复')
+    const commonFloors = parseFloors(commonFloorsText)
+    if (commonFloors === null) return setError('通用楼层格式不正确，支持「1层、B1」或「1-6」连续楼层简写')
+    const commonLabels = parseLabels(commonLabelsText)
+    if (!commonFloors.length && !commonLabels.length && specialFloors.every(row => !row.floor.trim() && !parseLabels(row.labelsText).length)) {
+      return setError('请填写通用楼层和二维码名称，或在下方添加特殊楼层')
+    }
+    if (commonFloors.length && !commonLabels.length) return setError('请填写通用二维码名称（使用通用名称的楼层已填写）')
+    if (!commonFloors.length && commonLabels.length) return setError('请填写使用通用名称的楼层（通用二维码名称已填写）')
+
+    const groups = []
+    const usedFloors = new Set()
+    const pushGroup = (floor, labels) => {
+      if (usedFloors.has(floor)) return `楼层「${floor}」重复：通用楼层与特殊楼层不能重叠`
+      if (labels.length > 500) return '每层最多设置 500 个二维码名称'
+      if (labels.some(label => label.length > 120)) return '二维码名称不能超过 120 个字符'
+      if (new Set(labels.map(label => label.toLocaleLowerCase())).size !== labels.length) return `楼层「${floor}」的二维码名称不能重复`
+      usedFloors.add(floor)
+      groups.push({ school: school.trim(), campus: campus.trim(), building: building.trim(), floor, labels })
+      return null
+    }
+    let planned = 0
+    for (const floor of commonFloors) {
+      const problem = pushGroup(floor, commonLabels)
+      if (problem) return setError(problem)
+      planned += commonLabels.length
+    }
+    for (const row of specialFloors) {
+      if (!row.floor.trim() && !parseLabels(row.labelsText).length) continue
+      const floors = parseFloors(row.floor)
+      const labels = parseLabels(row.labelsText)
+      if (floors === null || !floors.length) return setError(`特殊楼层「${row.floor}」格式不正确，支持「4层」或「4-5」`)
+      if (!labels.length) return setError(`特殊楼层「${row.floor}」请填写该层的二维码名称`)
+      for (const floor of floors) {
+        const problem = pushGroup(floor, labels)
+        if (problem) return setError(problem)
+        planned += labels.length
+      }
+    }
+    if (!groups.length) return setError('请至少为一个楼层填写二维码名称')
+    if (planned > 1000) return setError(`一次最多生成 1000 个二维码（当前约 ${planned} 个），请分批生成`)
     setBusy(true)
     try {
-      const created = await api.createQrBatch({
-        groups: groups.map(g => ({ school: school.trim(), campus: campus.trim(), building: building.trim(), floor: g.floor, labels: g.labels })),
-      })
+      const created = await api.createQrBatch({ groups })
       const createdTokens = new Set(created.map(item => item.token))
       const createdIds = (await api.qrCodes('UNCLAIMED')).filter(item => createdTokens.has(item.token)).map(item => item.id)
       if (createdIds.length !== created.length) throw new Error('新生成二维码读取不完整，请刷新后重新下载')
@@ -284,23 +332,13 @@ function QrCodePage() {
     return [item.school, item.campus, item.building, item.floor, label].filter(Boolean)
   }
 
-  async function openRebind(item) {
-    setError(''); setSuccess(''); setBusy(true)
-    try {
-      const facilities = await api.facilities('')
-      setFacilityOptions(facilities)
-      setRebindFacilityId(item.facility_id ? String(item.facility_id) : '')
-      setRebindItem(item)
-    } catch (cause) { setError(cause.message) } finally { setBusy(false) }
-  }
-
-  async function submitRebind() {
-    if (!rebindFacilityId) return setError('请选择需要绑定的设施')
+  async function resetQr(item) {
+    const hierarchy = hierarchyParts(item).join(' / ') || `NO.${String(item.serial_no).padStart(3, '0')}`
+    if (!window.confirm(`确定将「${hierarchy}」重置为未绑定吗？码值保持不变，仅解除与设施的绑定，采集员可重新扫码采集。`)) return
     setBusy(true); setError(''); setSuccess('')
     try {
-      await api.rebindQrCode(rebindItem.id, Number(rebindFacilityId))
-      setRebindItem(null)
-      setSuccess('二维码已重新绑定，原设施上的旧绑定已失效')
+      await api.unbindQrCode(item.id)
+      setSuccess('二维码已重置为未绑定，码值不变，采集员可重新扫码采集')
       await load()
     } catch (cause) { setError(cause.message) } finally { setBusy(false) }
   }
@@ -374,9 +412,19 @@ function QrCodePage() {
     } catch (cause) { setError(cause.message) } finally { setBusy(false) }
   }
 
+  const previewCommonFloors = parseFloors(commonFloorsText)
+  const commonFloorCount = previewCommonFloors ? previewCommonFloors.length : 0
+  const commonLabelCount = parseLabels(commonLabelsText).length
+  let plannedTotal = commonFloorCount * commonLabelCount
+  for (const row of specialFloors) {
+    const floors = parseFloors(row.floor)
+    const labels = parseLabels(row.labelsText)
+    if (floors && floors.length && labels.length) plannedTotal += floors.length * labels.length
+  }
+
   return <section className="work-page">
     <article className="panel" style={{ marginBottom: 16 }}>
-      <div className="panel-head"><div><h2>分级生成二维码</h2><p>按“学校 → 校区 → 楼栋 → 楼层 → 自定义名称”生成，名称可填写东、西、东楼梯口等现场位置</p></div></div>
+      <div className="panel-head"><div><h2>分级生成二维码</h2><p>按“学校 → 校区 → 楼栋 → 楼层 → 二维码名称”生成；多数楼层共用一组名称，名称不同的楼层在“特殊楼层”单独填写</p></div></div>
       <div className="qr-gen-form">
         <div className="qr-gen-head">
           <div className="field"><Label required>学校</Label><Input value={school} onChange={(_, d) => setSchool(d.value)} placeholder="例如 湖南科技职业学院" /></div>
@@ -384,15 +432,19 @@ function QrCodePage() {
           <div className="field"><Label required>楼栋</Label><Input value={building} onChange={(_, d) => setBuilding(d.value)} placeholder="例如 1号教学楼" /></div>
         </div>
         <div className="qr-gen-rows">
-          {floors.map((row, index) => <div key={index} className="qr-gen-row">
-            <div className="field"><Label required>楼层</Label><Input value={row.floor} onChange={(_, d) => setFloorRow(index, 'floor', d.value)} placeholder="例如 2层" /></div>
-            <div className="field qr-label-names-field"><Label required>二维码名称</Label><Textarea value={row.labelsText} onChange={(_, d) => setFloorRow(index, 'labelsText', d.value)} placeholder="例如 东、东楼梯口、西、西楼梯口、中" resize="vertical" /><span className="field-hint">多个名称用逗号或换行分隔，已识别 {parseLabels(row.labelsText).length} 个</span></div>
-            <Button appearance="subtle" disabled={floors.length === 1} onClick={() => setFloors(prev => prev.filter((_, i) => i !== index))}>删除</Button>
-          </div>)}
+          <div className="qr-gen-row">
+            <div className="field"><Label>使用通用名称的楼层</Label><Input value={commonFloorsText} onChange={(_, d) => setCommonFloorsText(d.value)} placeholder="例如 1-3、5-6、B1" /><span className="field-hint">支持「1-6」连续楼层简写，已识别 {commonFloorCount} 个楼层</span></div>
+            <div className="field qr-label-names-field"><Label>通用二维码名称</Label><Textarea value={commonLabelsText} onChange={(_, d) => setCommonLabelsText(d.value)} placeholder="例如 东、东楼梯口、西、西楼梯口、中" resize="vertical" /><span className="field-hint">多个名称用逗号或换行分隔，已识别 {commonLabelCount} 个，上述楼层全部共用这一组</span></div>
+          </div>
         </div>
+        {specialFloors.map((row, index) => <div key={index} className="qr-gen-row">
+          <div className="field"><Label>特殊楼层</Label><Input value={row.floor} onChange={(_, d) => setSpecialRow(index, 'floor', d.value)} placeholder="楼层，例如 4层 或 4-5" /></div>
+          <div className="field qr-label-names-field"><Label>该层二维码名称</Label><Textarea value={row.labelsText} onChange={(_, d) => setSpecialRow(index, 'labelsText', d.value)} placeholder="与通用名称不同时填写，例如 东、西" resize="vertical" /><span className="field-hint">整行留空则不生成</span></div>
+          <Button appearance="subtle" disabled={specialFloors.length === 1} onClick={() => setSpecialFloors(prev => prev.filter((_, i) => i !== index))}>删除</Button>
+        </div>)}
         <div className="qr-gen-actions">
-          <Button appearance="secondary" icon={<Add24Regular />} onClick={() => setFloors(prev => [...prev, { floor: '', labelsText: '' }])}>添加楼层</Button>
-          <Button appearance="primary" disabled={busy} onClick={generate}>{busy ? '正在处理…' : '生成并下载标签 PDF'}</Button>
+          <Button appearance="secondary" icon={<Add24Regular />} onClick={() => setSpecialFloors(prev => [...prev, { floor: '', labelsText: '' }])}>添加特殊楼层</Button>
+          <Button appearance="primary" disabled={busy} onClick={generate}>{busy ? '正在处理…' : plannedTotal ? `生成并下载标签 PDF（${plannedTotal} 个二维码）` : '生成并下载标签 PDF'}</Button>
         </div>
       </div>
       {success && <MessageBar intent="success" style={{ marginTop: 12 }}><MessageBarBody>{success}</MessageBarBody></MessageBar>}
@@ -423,29 +475,14 @@ function QrCodePage() {
           <td><span className="row-actions">
             {item.status === 'DELETED' ? <Button size="small" appearance="primary" disabled={busy} onClick={() => restoreQr(item)}>恢复</Button> : <>
               <Button size="small" disabled={busy} onClick={() => openRename(item)}>修改名称</Button>
-              <Button size="small" disabled={busy} onClick={() => openRebind(item)}>重新绑定</Button>
+              {item.status === 'BOUND' && <Button size="small" disabled={busy} onClick={() => resetQr(item)}>重置为未绑定</Button>}
               <Button size="small" className="btn-danger" disabled={busy} onClick={() => deleteQr(item)}>删除</Button>
             </>}
           </span></td>
         </tr>)}</tbody>
       </table></div> : <Empty>还没有二维码，先在上方生成一批</Empty>}
     </article>
-    <p className="muted-note">使用流程：填写楼层和各二维码的自定义名称 → 生成并打印标签 → 采集员扫码建档。已生成二维码可单独修改名称；重新绑定会保留二维码本身并转移到所选设施。</p>
-    {rebindItem && createPortal(<FluentProvider theme={webLightTheme}><div className="dialog-backdrop" role="presentation">
-      <div className="resolve-dialog" role="dialog" aria-modal="true" aria-labelledby="qr-rebind-title">
-        <div><h2 id="qr-rebind-title">重新绑定二维码</h2><p>{hierarchyParts(rebindItem).join(' / ') || `NO.${String(rebindItem.serial_no).padStart(3, '0')}`}</p></div>
-        <div className="field"><Label htmlFor="qr-rebind-facility" required>目标设施</Label>
-          <select id="qr-rebind-facility" className="native-select" value={rebindFacilityId} onChange={event => setRebindFacilityId(event.target.value)}>
-            <option value="">请选择设施</option>
-            {facilityOptions.map(facility => <option key={facility.id} value={facility.id}>{facility.facilityNo} · {facility.name} · {[facility.campus, facility.building, facility.floor].filter(Boolean).join(' / ')}</option>)}
-          </select>
-        </div>
-        <div className="dialog-actions">
-          <Button appearance="secondary" disabled={busy} onClick={() => setRebindItem(null)}>取消</Button>
-          <Button appearance="primary" disabled={busy || !rebindFacilityId} onClick={submitRebind}>{busy ? '正在绑定…' : '确认重新绑定'}</Button>
-        </div>
-      </div>
-    </div></FluentProvider>, document.body)}
+    <p className="muted-note">使用流程：填写楼层和各二维码的自定义名称 → 生成并打印标签 → 采集员扫码建档。已生成二维码可单独修改名称；重置为未绑定只解除与设施的绑定，码值保持不变，采集员可重新扫码采集。</p>
     {renameItem && createPortal(<FluentProvider theme={webLightTheme}><div className="dialog-backdrop" role="presentation">
       <div className="resolve-dialog" role="dialog" aria-modal="true" aria-labelledby="qr-rename-title">
         <div><h2 id="qr-rename-title">修改二维码名称</h2><p>{[renameItem.school, renameItem.campus, renameItem.building, renameItem.floor].filter(Boolean).join(' / ')}</p></div>

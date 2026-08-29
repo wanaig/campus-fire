@@ -332,38 +332,23 @@ public class QrCodeController {
                 qr.get("id"));
     }
 
-    @PostMapping("/{id}/rebind")
+    /** 重置为未绑定：仅解除与设施的绑定，码值保持不变，采集员可重新扫码采集。 */
+    @PostMapping("/{id}/unbind")
     @Transactional
-    public ApiResponse<Map<String, Object>> rebind(@PathVariable long id,
-                                                    @Valid @RequestBody RebindRequest request,
-                                                    Authentication authentication) {
+    public ApiResponse<Map<String, Object>> unbind(@PathVariable long id, Authentication authentication) {
         AuthenticatedUser user = requireAdmin(authentication);
         Map<String, Object> qr = findQr(id);
-        if ("DELETED".equals(String.valueOf(qr.get("status")))) throw new IllegalArgumentException("请先恢复已删除的二维码再重新绑定");
-        List<Map<String, Object>> targetRows = jdbcTemplate.queryForList(
-                "SELECT id,facility_no,name,qr_token FROM facility WHERE id=?", request.facilityId);
-        if (targetRows.isEmpty()) throw new IllegalArgumentException("目标设施不存在");
-        Map<String, Object> target = targetRows.get(0);
-        Long oldFacilityId = qr.get("facility_id") instanceof Number ? ((Number) qr.get("facility_id")).longValue() : null;
-
-        if (oldFacilityId != null && !oldFacilityId.equals(request.facilityId)) {
-            jdbcTemplate.update("UPDATE facility SET qr_token=? WHERE id=?",
-                    "UNBOUND-" + UUID.randomUUID().toString().replace("-", ""), oldFacilityId);
-        }
-        jdbcTemplate.update("UPDATE facility_qr_code SET status='UNCLAIMED',facility_id=NULL,bound_at=NULL,deleted_at=NULL " +
-                "WHERE facility_id=? AND id<>?", request.facilityId, id);
-        jdbcTemplate.update("UPDATE facility SET qr_token=? WHERE id=?", qr.get("token"), request.facilityId);
-        jdbcTemplate.update("UPDATE facility_qr_code SET status='BOUND',facility_id=?,bound_at=NOW() WHERE id=?",
-                request.facilityId, id);
-
+        if ("DELETED".equals(String.valueOf(qr.get("status")))) throw new IllegalArgumentException("请先恢复已删除的二维码再重置");
+        if (!(qr.get("facility_id") instanceof Number)) throw new IllegalArgumentException("该二维码未绑定设施，无需重置");
+        Long facilityId = ((Number) qr.get("facility_id")).longValue();
+        jdbcTemplate.update("UPDATE facility SET qr_token=? WHERE id=?",
+                "UNBOUND-" + UUID.randomUUID().toString().replace("-", ""), facilityId);
+        jdbcTemplate.update("UPDATE facility_qr_code SET status='UNCLAIMED',facility_id=NULL,bound_at=NULL WHERE id=?", id);
         Map<String, Object> details = qrDetails(qr);
-        details.put("oldFacilityId", oldFacilityId);
-        details.put("newFacilityId", request.facilityId);
-        details.put("newFacilityNo", target.get("facility_no"));
-        auditService.record(user.getId(), "QRCODE_REBIND", "FACILITY_QR_CODE", String.valueOf(id), details);
+        details.put("unboundFacilityId", facilityId);
+        auditService.record(user.getId(), "QRCODE_UNBIND", "FACILITY_QR_CODE", String.valueOf(id), details);
         return ApiResponse.success(jdbcTemplate.queryForMap(
-                "SELECT q.id,q.token,q.status,q.facility_id,f.facility_no,f.name AS facility_name,q.bound_at " +
-                "FROM facility_qr_code q LEFT JOIN facility f ON f.id=q.facility_id WHERE q.id=?", id));
+                "SELECT id,token,status,facility_id,bound_at FROM facility_qr_code WHERE id=?", id));
     }
 
     private Map<String, Object> findQr(long id) {
@@ -474,11 +459,6 @@ public class QrCodeController {
             /** 自定义名称列表，例如：东、东楼梯口、西。为空时兼容旧版数量+序号生成。 */
             public List<String> labels;
         }
-    }
-
-    public static class RebindRequest {
-        @NotNull(message = "请选择需要绑定的设施")
-        public Long facilityId;
     }
 
     public static class LabelRequest {
