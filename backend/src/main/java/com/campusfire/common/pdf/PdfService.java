@@ -33,7 +33,8 @@ import java.util.Map;
 
 /**
  * PDF 生成组件：二维码标签与平台介绍页。
- * 中文字体优先从项目目录 fonts/ 加载（跨平台），其次按操作系统常见路径探测。
+ * 中文字体优先从项目目录 fonts/ 加载（跨平台），其次按操作系统常见路径探测；
+ * 校徽 Logo 从 classpath:brand/school-logo.png 读取，缺失时自动省略。
  */
 @Component
 public class PdfService {
@@ -41,14 +42,15 @@ public class PdfService {
 
     public static final String BRAND_TITLE = "湖南科技职业学院";
     public static final String BRAND_SUBTITLE = "智慧消防巡检管理平台";
-    public static final String DEV_CREDIT = "软件学院 2024级软件技术3班 开发团队";
-    private static final java.awt.Color RED = new java.awt.Color(180, 35, 24);
-    private static final java.awt.Color DARK = new java.awt.Color(23, 33, 43);
-    private static final java.awt.Color GRAY = new java.awt.Color(98, 114, 125);
-    private static final java.awt.Color LIGHT_BG = new java.awt.Color(250, 251, 252);
-    private static final java.awt.Color BORDER = new java.awt.Color(226, 232, 236);
+    private static final Color RED = new Color(180, 35, 24);
+    private static final Color DARK = new Color(23, 33, 43);
+    private static final Color GRAY = new Color(98, 114, 125);
+    private static final Color BODY = new Color(69, 84, 94);
+    private static final Color LIGHT_BG = new Color(250, 251, 252);
+    private static final Color BORDER = new Color(226, 232, 236);
 
     private volatile BaseFont baseFont;
+    private volatile byte[] logoBytes;
 
     private BaseFont font() {
         if (baseFont != null) return baseFont;
@@ -88,6 +90,19 @@ public class PdfService {
         }
     }
 
+    private byte[] logo() {
+        if (logoBytes != null) return logoBytes;
+        synchronized (this) {
+            if (logoBytes != null) return logoBytes;
+            try (InputStream in = PdfService.class.getResourceAsStream("/brand/school-logo.png")) {
+                if (in != null) logoBytes = readAll(in);
+            } catch (Exception e) {
+                log.warn("校徽 Logo 读取失败，PDF 左上角将不带校徽: {}", e.getMessage());
+            }
+            return logoBytes;
+        }
+    }
+
     private static byte[] readAll(InputStream in) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         byte[] buffer = new byte[8192];
@@ -96,7 +111,7 @@ public class PdfService {
         return out.toByteArray();
     }
 
-    private Font font(float size, int style, java.awt.Color color) {
+    private Font font(float size, int style, Color color) {
         return new Font(font(), size, style, color);
     }
 
@@ -118,7 +133,7 @@ public class PdfService {
     /** 二维码介绍标签 PDF：每个二维码使用一张横向 A4 页面。 */
     public byte[] labelsPdf(java.util.List<LabelData> labels) throws Exception {
         Rectangle pageSize = PageSize.A4.rotate();
-        Document document = new Document(pageSize, 34, 34, 26, 24);
+        Document document = new Document(pageSize, 34, 34, 22, 20);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         PdfWriter writer = PdfWriter.getInstance(document, out);
         document.open();
@@ -132,33 +147,17 @@ public class PdfService {
 
     private void addLabelPage(Document document, PdfWriter writer, Rectangle pageSize, LabelData label) throws Exception {
         drawPosterFrame(writer, pageSize);
-
-        Paragraph school = new Paragraph(BRAND_TITLE, font(14f, Font.BOLD, DARK));
-        school.setAlignment(Element.ALIGN_CENTER);
-        school.setLeading(16f);
-        document.add(school);
-        Paragraph platform = new Paragraph(BRAND_SUBTITLE, font(21.5f, Font.BOLD, RED));
-        platform.setAlignment(Element.ALIGN_CENTER);
-        platform.setLeading(23.5f);
-        platform.setSpacingAfter(6f);
-        document.add(platform);
+        addHeader(document);
         drawLine(document, writer, RED, 1.7f);
 
-        String intro = "本平台由我校软件学院 2024级软件技术3班 学生自主设计与开发，实现校园消防设施「一物一码」数字化管理：全校每台消防设施拥有专属二维码身份，巡检人员扫码即可完成定位校验、逐项检查、现场拍照，数据实时上传管理端，形成发现隐患、自动派单、整改闭环、数据看板的完整安全治理链条。";
-        Paragraph introPara = new Paragraph(intro, font(8.7f, Font.NORMAL, new java.awt.Color(69, 84, 94)));
-        introPara.setLeading(14f);
-        introPara.setSpacingBefore(12f);
-        introPara.setSpacingAfter(10f);
-        introPara.setIndentationLeft(16f);
-        introPara.setIndentationRight(16f);
-        document.add(introPara);
+        document.add(introParagraph());
 
         document.add(sectionTitle("核心功能"));
         document.add(functionGrid());
 
         PdfPTable main = new PdfPTable(new float[]{4.2f, 1f});
         main.setWidthPercentage(100);
-        main.setSpacingAfter(14f);
+        main.setSpacingAfter(8f);
         PdfPCell stepsContainer = noBorderCell();
         stepsContainer.setPaddingRight(12f);
         stepsContainer.addElement(sectionTitle("巡检操作规范"));
@@ -172,11 +171,55 @@ public class PdfService {
         main.addCell(stepsContainer);
         main.addCell(labelPanel(label));
         document.add(main);
-        drawLine(document, writer, RED, 1.2f);
-        Paragraph footer = new Paragraph(BRAND_TITLE + "  ·  " + DEV_CREDIT, font(8f, Font.BOLD, DARK));
-        footer.setAlignment(Element.ALIGN_CENTER);
-        footer.setSpacingBefore(14f);
-        document.add(footer);
+
+        document.add(safetyBanner());
+    }
+
+    /** 页眉：左侧校徽与居中标题同行（左右等宽列保证标题绝对居中）。 */
+    private void addHeader(Document document) throws Exception {
+        PdfPTable header = new PdfPTable(new float[]{1.1f, 7.8f, 1.1f});
+        header.setWidthPercentage(100);
+
+        PdfPCell logoCell = noBorderCell();
+        logoCell.setVerticalAlignment(Element.ALIGN_MIDDLE);
+        byte[] bytes = logo();
+        if (bytes != null) {
+            Image logo = Image.getInstance(bytes);
+            logo.scaleToFit(48f, 48f);
+            logo.setAlignment(Element.ALIGN_LEFT | Element.ALIGN_MIDDLE);
+            logoCell.addElement(logo);
+        }
+        header.addCell(logoCell);
+
+        PdfPCell titleCell = noBorderCell();
+        Paragraph school = new Paragraph(BRAND_TITLE, font(14.5f, Font.BOLD, DARK));
+        school.setAlignment(Element.ALIGN_CENTER);
+        school.setLeading(16f);
+        titleCell.addElement(school);
+        Paragraph platform = new Paragraph(BRAND_SUBTITLE, font(22f, Font.BOLD, RED));
+        platform.setAlignment(Element.ALIGN_CENTER);
+        platform.setLeading(24f);
+        titleCell.addElement(platform);
+        header.addCell(titleCell);
+
+        header.addCell(noBorderCell());
+        document.add(header);
+    }
+
+    /** 平台简介：首行空两格。 */
+    private Paragraph introParagraph() {
+        String text = "本平台由学校保卫部主导建设，软件学院 2024级软件技术3班 骆希同学设计开发，实现校园消防设施“一物一码”数字化管理："
+                + "全校每台消防设施拥有专属二维码身份，巡检人员扫码即可完成定位校验、逐项检查、现场拍照，数据实时上传管理端，"
+                + "形成“发现隐患—自动派单—整改闭环—数据看板”的完整安全治理链条。";
+        Paragraph intro = new Paragraph(text, font(8.8f, Font.NORMAL, BODY));
+        intro.setAlignment(Element.ALIGN_JUSTIFIED);
+        intro.setLeading(13.2f);
+        intro.setFirstLineIndent(17.6f);
+        intro.setSpacingBefore(9f);
+        intro.setSpacingAfter(7f);
+        intro.setIndentationLeft(14f);
+        intro.setIndentationRight(14f);
+        return intro;
     }
 
     private PdfPTable stepsPanel(String[][] stepsData) throws Exception {
@@ -191,15 +234,15 @@ public class PdfService {
             noCell.setHorizontalAlignment(Element.ALIGN_CENTER);
             noCell.setVerticalAlignment(Element.ALIGN_MIDDLE);
             noCell.setPadding(5f);
-            noCell.setMinimumHeight(48f);
+            noCell.setMinimumHeight(45f);
             PdfPCell textCell = new PdfPCell();
             textCell.setBorder(Rectangle.NO_BORDER);
             textCell.setPaddingLeft(8f);
             textCell.setPaddingRight(7f);
-            textCell.setPaddingTop(7f);
-            textCell.setPaddingBottom(6f);
+            textCell.setPaddingTop(6f);
+            textCell.setPaddingBottom(5f);
             textCell.setVerticalAlignment(Element.ALIGN_MIDDLE);
-            textCell.setMinimumHeight(48f);
+            textCell.setMinimumHeight(45f);
             Paragraph stepTitle = new Paragraph(row[1], font(9f, Font.BOLD, DARK));
             stepTitle.setLeading(10f);
             stepTitle.setSpacingAfter(1.5f);
@@ -214,10 +257,10 @@ public class PdfService {
             card.setBorder(Rectangle.NO_BORDER);
             card.setCellEvent(new RoundedPanel(LIGHT_BG, BORDER, 4f));
             card.setPadding(0f);
-            card.setMinimumHeight(48f);
+            card.setMinimumHeight(45f);
             card.addElement(content);
             stack.addCell(card);
-            if (index + 1 < stepsData.length) stack.addCell(spacerCell(6f));
+            if (index + 1 < stepsData.length) stack.addCell(spacerCell(5f));
         }
         return stack;
     }
@@ -225,42 +268,95 @@ public class PdfService {
     private PdfPCell labelPanel(LabelData label) throws Exception {
         PdfPCell panel = new PdfPCell();
         panel.setBorder(Rectangle.NO_BORDER);
-        panel.setCellEvent(new RoundedPanel(LIGHT_BG, new java.awt.Color(190, 202, 210), 5f, true));
-        panel.setPadding(9f);
+        panel.setCellEvent(new RoundedPanel(LIGHT_BG, new Color(190, 202, 210), 5f, true));
+        panel.setPadding(8f);
         panel.setVerticalAlignment(Element.ALIGN_MIDDLE);
-        panel.setMinimumHeight(229f);
+        panel.setMinimumHeight(204f);
 
         Image qr = Image.getInstance(qrImage(label.token, 400));
-        qr.scaleAbsolute(106f, 106f);
+        qr.scaleAbsolute(102f, 102f);
         qr.setAlignment(Element.ALIGN_CENTER);
         panel.addElement(qr);
 
-        Paragraph code = new Paragraph(ellipsize(label.displayCode, 28), font(9.4f, Font.BOLD, DARK));
+        Paragraph enter = new Paragraph("扫码进入小程序", font(9.6f, Font.BOLD, DARK));
+        enter.setAlignment(Element.ALIGN_CENTER);
+        enter.setLeading(11f);
+        enter.setSpacingBefore(5f);
+        panel.addElement(enter);
+
+        Paragraph code = new Paragraph(ellipsize(label.displayCode, 26), font(8.8f, Font.BOLD, DARK));
         code.setAlignment(Element.ALIGN_CENTER);
-        code.setLeading(11f);
-        code.setSpacingBefore(5f);
+        code.setLeading(10.5f);
+        code.setSpacingBefore(6f);
         panel.addElement(code);
 
-        Paragraph location = new Paragraph(ellipsize(compactLocation(label.location), 30), font(7f, Font.NORMAL, GRAY));
+        Paragraph location = new Paragraph(ellipsize(compactLocation(label.location), 30), font(6.6f, Font.NORMAL, GRAY));
         location.setAlignment(Element.ALIGN_CENTER);
-        location.setLeading(9f);
-        location.setSpacingBefore(3f);
+        location.setLeading(8.5f);
+        location.setSpacingBefore(2.5f);
         panel.addElement(location);
 
         if (!isBlank(label.facility)) {
-            Paragraph facility = new Paragraph(ellipsize(label.facility, 22), font(6.6f, Font.NORMAL, GRAY));
+            Paragraph facility = new Paragraph(ellipsize(label.facility, 22), font(6.2f, Font.NORMAL, GRAY));
             facility.setAlignment(Element.ALIGN_CENTER);
             facility.setLeading(8f);
             facility.setSpacingBefore(1f);
             panel.addElement(facility);
         }
-
-        Paragraph action = new Paragraph("请使用小程序扫码巡检", font(7.4f, Font.BOLD, DARK));
-        action.setAlignment(Element.ALIGN_CENTER);
-        action.setLeading(9f);
-        action.setSpacingBefore(5f);
-        panel.addElement(action);
         return panel;
+    }
+
+    /** 底部安全宣传横幅：左侧红色标语块，右侧消防守则。 */
+    private PdfPTable safetyBanner() throws Exception {
+        PdfPTable banner = new PdfPTable(new float[]{0.30f, 0.70f});
+        banner.setWidthPercentage(100);
+
+        PdfPCell slogan = new PdfPCell();
+        slogan.setBorder(Rectangle.NO_BORDER);
+        slogan.setCellEvent(new RoundedPanel(RED, RED, 5f));
+        slogan.setPaddingLeft(10f);
+        slogan.setPaddingRight(10f);
+        slogan.setVerticalAlignment(Element.ALIGN_MIDDLE);
+        slogan.setMinimumHeight(62f);
+        Paragraph sloganTitle = new Paragraph("消防安全 · 人人有责", font(12.5f, Font.BOLD, Color.WHITE));
+        sloganTitle.setAlignment(Element.ALIGN_CENTER);
+        sloganTitle.setLeading(15f);
+        slogan.addElement(sloganTitle);
+        Paragraph sloganSub = new Paragraph("全民消防 生命至上 预防为主 防消结合", font(6.6f, Font.NORMAL, new Color(255, 219, 214)));
+        sloganSub.setAlignment(Element.ALIGN_CENTER);
+        sloganSub.setLeading(9f);
+        sloganSub.setSpacingBefore(3f);
+        slogan.addElement(sloganSub);
+        banner.addCell(slogan);
+
+        PdfPCell rules = new PdfPCell();
+        rules.setBorder(Rectangle.NO_BORDER);
+        rules.setCellEvent(new RoundedPanel(LIGHT_BG, BORDER, 5f));
+        rules.setPaddingLeft(14f);
+        rules.setPaddingRight(8f);
+        rules.setPaddingTop(5f);
+        rules.setPaddingBottom(5f);
+        rules.setVerticalAlignment(Element.ALIGN_MIDDLE);
+        rules.setMinimumHeight(62f);
+        String[][] ruleLines = {
+                {"爱护消防设施，严禁圈占、堵塞、遮挡、损毁"},
+                {"灭火器、消防栓为应急救命设施，非紧急情况请勿动用"},
+                {"发现设施缺损或二维码破损，请及时报告保卫部"},
+                {"消防控制室及应急电话（24小时值班） ", "0731-82862855"},
+                {"本平台由学校保卫部主导建设并统一管理"},
+        };
+        for (String[] line : ruleLines) {
+            Paragraph p = new Paragraph();
+            p.add(new Chunk("• ", font(8f, Font.BOLD, RED)));
+            for (int i = 0; i < line.length; i++) {
+                boolean highlight = i % 2 == 1;
+                p.add(new Chunk(line[i], font(highlight ? 7.8f : 7.4f, Font.BOLD, highlight ? RED : BODY)));
+            }
+            p.setLeading(10.6f);
+            rules.addElement(p);
+        }
+        banner.addCell(rules);
+        return banner;
     }
 
     private void drawPosterFrame(PdfWriter writer, Rectangle pageSize) {
@@ -272,16 +368,16 @@ public class PdfService {
     }
 
     private static class RoundedPanel implements PdfPCellEvent {
-        private final java.awt.Color fill;
-        private final java.awt.Color border;
+        private final Color fill;
+        private final Color border;
         private final float radius;
         private final boolean dashed;
 
-        private RoundedPanel(java.awt.Color fill, java.awt.Color border, float radius) {
+        private RoundedPanel(Color fill, Color border, float radius) {
             this(fill, border, radius, false);
         }
 
-        private RoundedPanel(java.awt.Color fill, java.awt.Color border, float radius, boolean dashed) {
+        private RoundedPanel(Color fill, Color border, float radius, boolean dashed) {
             this.fill = fill;
             this.border = border;
             this.radius = radius;
@@ -309,14 +405,14 @@ public class PdfService {
         bar.setBackground(RED);
         p.add(bar);
         p.add(new Chunk("  " + text, font(11.3f, Font.BOLD, DARK)));
-        p.setSpacingBefore(6f);
-        p.setSpacingAfter(7f);
+        p.setSpacingBefore(4f);
+        p.setSpacingAfter(6f);
         return p;
     }
 
     private PdfPTable functionGrid() throws Exception {
         String[][] functions = {
-                {"一物一码", "全校消防设施建档赋码，身份唯一、档案集中"},
+                {"一物一码", "全校消防设施建档赋码，身份唯一、精准建档"},
                 {"扫码巡检", "扫描设施二维码即可开展当次巡检，任务自动匹配"},
                 {"定位校验", "系统自动核验巡检人员是否位于设施现场，杜绝远程代检"},
                 {"拍照留痕", "仅限现场拍摄取证，拍摄时间与位置双重校验"},
@@ -325,7 +421,7 @@ public class PdfService {
         };
         PdfPTable table = new PdfPTable(new float[]{1f, 0.035f, 1f, 0.035f, 1f});
         table.setWidthPercentage(100);
-        table.setSpacingAfter(13f);
+        table.setSpacingAfter(10f);
         for (int i = 0; i < functions.length; i++) {
             String[] f = functions[i];
             PdfPCell cell = new PdfPCell();
@@ -333,10 +429,10 @@ public class PdfService {
             cell.setCellEvent(new RoundedPanel(LIGHT_BG, BORDER, 4f));
             cell.setPaddingLeft(8f);
             cell.setPaddingRight(8f);
-            cell.setPaddingTop(8f);
-            cell.setPaddingBottom(7f);
+            cell.setPaddingTop(7f);
+            cell.setPaddingBottom(6f);
             cell.setVerticalAlignment(Element.ALIGN_MIDDLE);
-            cell.setMinimumHeight(50f);
+            cell.setMinimumHeight(48f);
             Paragraph functionTitle = new Paragraph(f[0], font(9.7f, Font.BOLD, DARK));
             functionTitle.setLeading(11f);
             functionTitle.setSpacingAfter(2f);
@@ -347,7 +443,7 @@ public class PdfService {
             table.addCell(cell);
             if (i % 3 != 2) table.addCell(spacerCell(0f));
             if (i == 2) {
-                for (int col = 0; col < 5; col++) table.addCell(spacerCell(7f));
+                for (int col = 0; col < 5; col++) table.addCell(spacerCell(6f));
             }
         }
         return table;
@@ -360,7 +456,7 @@ public class PdfService {
         return cell;
     }
 
-    private void drawLine(Document document, PdfWriter writer, java.awt.Color color, float width) {
+    private void drawLine(Document document, PdfWriter writer, Color color, float width) {
         PdfContentByte cb = writer.getDirectContent();
         cb.setColorStroke(new Color(color.getRed(), color.getGreen(), color.getBlue()));
         cb.setLineWidth(width);
