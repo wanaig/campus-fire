@@ -152,14 +152,16 @@ public class PdfService {
         PdfPCell cell = new PdfPCell();
         cell.setBorder(Rectangle.NO_BORDER);
         cell.setCellEvent(new RoundedDashedBorder());
-        cell.setPadding(8f);
+        cell.setPaddingLeft(8f);
+        cell.setPaddingRight(8f);
+        cell.setPaddingTop(4f);
+        cell.setPaddingBottom(12f);
         cell.setFixedHeight(LABEL_HEIGHT);
-        cell.setVerticalAlignment(Element.ALIGN_TOP);
+        cell.setVerticalAlignment(Element.ALIGN_MIDDLE);
 
         Paragraph school = new Paragraph(BRAND_TITLE, font(12.2f, Font.BOLD, DARK));
         school.setAlignment(Element.ALIGN_CENTER);
         school.setLeading(15f);
-        school.setSpacingBefore(6f);
         cell.addElement(school);
 
         Chunk subtitleText = new Chunk(BRAND_SUBTITLE, font(7.3f, Font.NORMAL, GRAY));

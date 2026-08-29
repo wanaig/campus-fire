@@ -220,14 +220,21 @@ function QrCodePage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [busy, setBusy] = useState(false)
-  const [groupMode, setGroupMode] = useState(true)
+  const [school, setSchool] = useState(QR_BRAND_TITLE)
   const [campus, setCampus] = useState('')
   const [building, setBuilding] = useState('')
   const [floors, setFloors] = useState([{ floor: '', count: '4' }])
+  const [rebindItem, setRebindItem] = useState(null)
+  const [rebindFacilityId, setRebindFacilityId] = useState('')
+  const [facilityOptions, setFacilityOptions] = useState([])
+  const [selectedIds, setSelectedIds] = useState([])
 
   async function load() {
     setLoading(true); setError('')
-    try { setItems(await api.qrCodes(status, keyword)) } catch (cause) { setError(cause.message) } finally { setLoading(false) }
+    try {
+      setItems(await api.qrCodes(status, keyword))
+      setSelectedIds([])
+    } catch (cause) { setError(cause.message) } finally { setLoading(false) }
   }
   useEffect(() => { load() }, [status])
 
@@ -237,36 +244,90 @@ function QrCodePage() {
 
   async function generate() {
     setError(''); setSuccess('')
+    const groups = floors
+      .map(row => ({ floor: row.floor.trim(), count: Number(row.count) }))
+      .filter(row => row.floor && row.count > 0)
+    if (!school.trim() || !campus.trim() || !building.trim()) return setError('请填写学校、校区和楼栋')
+    if (!groups.length) return setError('请至少为一个楼层填写楼层名称和数量')
+    if (groups.some(g => !Number.isInteger(g.count) || g.count < 1 || g.count > 500)) return setError('每层数量需为 1-500 的整数')
     let created
-    if (groupMode) {
-      const groups = floors
-        .map(row => ({ floor: row.floor.trim(), count: Number(row.count) }))
-        .filter(row => row.floor && row.count > 0)
-      if (!campus.trim() || !building.trim()) return setError('请填写校区和楼栋')
-      if (!groups.length) return setError('请至少为一个楼层填写楼层名称和数量')
-      if (groups.some(g => !Number.isInteger(g.count) || g.count < 1 || g.count > 500)) return setError('每层数量需为 1-500 的整数')
-      setBusy(true)
-      try {
-        created = await api.createQrBatch({
-          groups: groups.map(g => ({ campus: campus.trim(), building: building.trim(), floor: g.floor, count: g.count })),
-        })
-      } catch (cause) { return setError(cause.message) } finally { setBusy(false) }
-    } else {
-      const total = Number(floors[0].count)
-      if (!Number.isInteger(total) || total < 1 || total > 500) return setError('生成数量需为 1-500 的整数')
-      setBusy(true)
-      try {
-        created = await api.createQrBatch({ count: total })
-      } catch (cause) { return setError(cause.message) } finally { setBusy(false) }
-    }
+    setBusy(true)
+    try {
+      created = await api.createQrBatch({
+        groups: groups.map(g => ({ school: school.trim(), campus: campus.trim(), building: building.trim(), floor: g.floor, count: g.count })),
+      })
+    } catch (cause) { return setError(cause.message) } finally { setBusy(false) }
     await load()
     setSuccess(`已生成 ${created.length} 个二维码，PDF 已开始下载`)
     downloadLabels('UNCLAIMED')
   }
 
-  function floorNo(item) {
-    return [item.campus, item.building, item.floor].filter(Boolean).join(' / ')
+  function hierarchyParts(item) {
+    const number = item.location_no == null ? null : `第${String(item.location_no).padStart(2, '0')}号`
+    return [item.school, item.campus, item.building, item.floor, number].filter(Boolean)
   }
+
+  async function openRebind(item) {
+    setError(''); setSuccess(''); setBusy(true)
+    try {
+      const facilities = await api.facilities('')
+      setFacilityOptions(facilities)
+      setRebindFacilityId(item.facility_id ? String(item.facility_id) : '')
+      setRebindItem(item)
+    } catch (cause) { setError(cause.message) } finally { setBusy(false) }
+  }
+
+  async function submitRebind() {
+    if (!rebindFacilityId) return setError('请选择需要绑定的设施')
+    setBusy(true); setError(''); setSuccess('')
+    try {
+      await api.rebindQrCode(rebindItem.id, Number(rebindFacilityId))
+      setRebindItem(null)
+      setSuccess('二维码已重新绑定，原设施上的旧绑定已失效')
+      await load()
+    } catch (cause) { setError(cause.message) } finally { setBusy(false) }
+  }
+
+  async function deleteQr(item) {
+    const hierarchy = hierarchyParts(item).join(' / ') || `NO.${String(item.serial_no).padStart(3, '0')}`
+    const warning = item.status === 'BOUND'
+      ? `该二维码已绑定设施。删除后原标签立即失效，相关设施需要重新绑定其他二维码。确定删除「${hierarchy}」吗？`
+      : `确定删除二维码「${hierarchy}」吗？删除后可在“已删除”中恢复。`
+    if (!window.confirm(warning)) return
+    setBusy(true); setError(''); setSuccess('')
+    try {
+      await api.deleteQrCode(item.id)
+      setSuccess('二维码已删除')
+      await load()
+    } catch (cause) { setError(cause.message) } finally { setBusy(false) }
+  }
+
+  async function batchDeleteQr() {
+    if (!selectedIds.length) return
+    if (!window.confirm(`确定删除已选择的 ${selectedIds.length} 个二维码吗？删除后可在“已删除”中恢复。`)) return
+    setBusy(true); setError(''); setSuccess('')
+    try {
+      const result = await api.batchDeleteQrCodes(selectedIds)
+      setSuccess(`已删除 ${result.deleted} 个二维码`)
+      await load()
+    } catch (cause) { setError(cause.message) } finally { setBusy(false) }
+  }
+
+  async function restoreQr(item) {
+    setBusy(true); setError(''); setSuccess('')
+    try {
+      await api.restoreQrCode(item.id)
+      setSuccess('二维码已恢复为未绑定状态')
+      await load()
+    } catch (cause) { setError(cause.message) } finally { setBusy(false) }
+  }
+
+  function toggleSelected(id) {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(value => value !== id) : [...prev, id])
+  }
+
+  const selectableIds = items.filter(item => item.status !== 'DELETED').map(item => item.id)
+  const allSelected = selectableIds.length > 0 && selectableIds.every(id => selectedIds.includes(id))
 
   async function downloadLabels(labelStatus) {
     setError('')
@@ -286,13 +347,10 @@ function QrCodePage() {
 
   return <section className="work-page">
     <article className="panel" style={{ marginBottom: 16 }}>
-      <div className="panel-head"><div><h2>批量生成二维码</h2><p>按楼层分组生成，每层独立序号（如 1号教学楼-1层-01），生成后自动下载标签 PDF（每页 9 张）</p></div></div>
-      <div className="chips-row">
-        <button className={`chip ${groupMode ? 'chip-active' : ''}`} onClick={() => setGroupMode(true)}>按楼层分组</button>
-        <button className={`chip ${!groupMode ? 'chip-active' : ''}`} onClick={() => setGroupMode(false)}>普通批量（纯序号）</button>
-      </div>
-      {groupMode ? <div className="qr-gen-form">
+      <div className="panel-head"><div><h2>分级生成二维码</h2><p>按“学校 → 校区 → 楼栋 → 楼层 → 编号”生成，每个楼层自动连续编号</p></div></div>
+      <div className="qr-gen-form">
         <div className="qr-gen-head">
+          <div className="field"><Label required>学校</Label><Input value={school} onChange={(_, d) => setSchool(d.value)} placeholder="例如 湖南科技职业学院" /></div>
           <div className="field"><Label required>校区</Label><Input value={campus} onChange={(_, d) => setCampus(d.value)} placeholder="例如 主校区" /></div>
           <div className="field"><Label required>楼栋</Label><Input value={building} onChange={(_, d) => setBuilding(d.value)} placeholder="例如 1号教学楼" /></div>
         </div>
@@ -307,45 +365,58 @@ function QrCodePage() {
           <Button appearance="secondary" icon={<Add24Regular />} onClick={() => setFloors(prev => [...prev, { floor: '', count: '4' }])}>添加楼层</Button>
           <Button appearance="primary" disabled={busy} onClick={generate}>{busy ? '正在处理…' : '生成并下载标签 PDF'}</Button>
         </div>
-      </div> : <div className="qr-gen-form">
-        <div className="qr-gen-head">
-          <div className="field" style={{ maxWidth: 240 }}><Label required>总数量（1-500）</Label>
-            <Input type="number" min="1" max="500" value={floors[0].count} onChange={(_, d) => setFloorRow(0, 'count', d.value)} />
-          </div>
-        </div>
-        <div className="qr-gen-actions">
-          <Button appearance="primary" disabled={busy} onClick={generate}>{busy ? '正在处理…' : '生成并下载标签 PDF'}</Button>
-        </div>
-      </div>}
+      </div>
       {success && <MessageBar intent="success" style={{ marginTop: 12 }}><MessageBarBody>{success}</MessageBarBody></MessageBar>}
     </article>
     <div className="work-toolbar">
       <Input size="large" value={keyword} onChange={(_, d) => setKeyword(d.value)} placeholder="输入码值/位置/绑定设施查询" style={{ maxWidth: 280 }} />
       <Button appearance="primary" onClick={() => load()}>查询</Button>
-      <Button icon={<Print24Regular />} appearance="secondary" disabled={busy} onClick={() => downloadLabels(status)}>下载标签 PDF（当前筛选）</Button>
+      <Button icon={<Print24Regular />} appearance="secondary" disabled={busy || status === 'DELETED'} onClick={() => downloadLabels(status)}>下载标签 PDF（当前筛选）</Button>
       <Button icon={<Print24Regular />} appearance="secondary" disabled={busy} onClick={() => downloadPoster()}>下载平台介绍页 PDF</Button>
     </div>
     {error && <MessageBar intent="error"><MessageBarBody>{error}</MessageBarBody></MessageBar>}
     <article className="panel data-panel">
       <div className="chips-row">
-        {[['', '全部'], ['UNCLAIMED', '未绑定'], ['BOUND', '已绑定'], ['REVOKED', '已作废']].map(([value, label]) => (
+        {[['', '全部'], ['UNCLAIMED', '未绑定'], ['BOUND', '已绑定'], ['REVOKED', '已作废'], ['DELETED', '已删除']].map(([value, label]) => (
           <button key={value} className={`chip ${status === value ? 'chip-active' : ''}`} onClick={() => setStatus(value)}>{label}</button>
         ))}
+        {status !== 'DELETED' && <Button appearance="secondary" disabled={busy || !selectedIds.length} onClick={batchDeleteQr}>批量删除（{selectedIds.length}）</Button>}
       </div>
       {loading ? <Spinner label="正在读取二维码" /> : items.length ? <div className="table-wrap"><table>
-        <thead><tr><th>全局序号</th><th>位置分组</th><th>码值</th><th>状态</th><th>绑定设施</th><th>生成时间</th><th>绑定时间</th></tr></thead>
+        <thead><tr><th className="select-cell"><input type="checkbox" aria-label="选择当前筛选全部二维码" disabled={!selectableIds.length || status === 'DELETED'} checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : selectableIds)} /></th><th>全局序号</th><th>分级位置</th><th>码值</th><th>状态</th><th>绑定设施</th><th>时间</th><th>操作</th></tr></thead>
         <tbody>{items.map(item => <tr key={item.id}>
+          <td className="select-cell"><input type="checkbox" aria-label={`选择 NO.${String(item.serial_no).padStart(3, '0')}`} disabled={item.status === 'DELETED'} checked={selectedIds.includes(item.id)} onChange={() => toggleSelected(item.id)} /></td>
           <td><strong>NO.{String(item.serial_no).padStart(3, '0')}</strong></td>
-          <td>{floorNo(item) || '—'}</td>
+          <td>{hierarchyParts(item).length ? <span><strong>{hierarchyParts(item)[0]}</strong><small>{hierarchyParts(item).slice(1).join(' / ')}</small></span> : '—'}</td>
           <td><code className="token-code">{item.token}</code></td>
-          <td><span className={`badge ${item.status === 'UNCLAIMED' ? 'warn' : item.status === 'BOUND' ? 'ok' : ''}`}>{item.status === 'UNCLAIMED' ? '未绑定' : item.status === 'BOUND' ? '已绑定' : '已作废'}</span></td>
+          <td><span className={`badge ${item.status === 'UNCLAIMED' ? 'warn' : item.status === 'BOUND' ? 'ok' : ''}`}>{item.status === 'UNCLAIMED' ? '未绑定' : item.status === 'BOUND' ? '已绑定' : item.status === 'DELETED' ? '已删除' : '已作废'}</span></td>
           <td>{item.facility_no ? <span><strong>{item.facility_name}</strong><small>{item.facility_no}</small></span> : '—'}</td>
-          <td>{String(item.created_at).slice(0, 19).replace('T', ' ')}</td>
-          <td>{item.bound_at ? String(item.bound_at).slice(0, 19).replace('T', ' ') : '—'}</td>
+          <td><span>{String(item.created_at).slice(0, 19).replace('T', ' ')}{item.deleted_at && <small>删除：{String(item.deleted_at).slice(0, 19).replace('T', ' ')}</small>}</span></td>
+          <td><span className="row-actions">
+            {item.status === 'DELETED' ? <Button size="small" appearance="primary" disabled={busy} onClick={() => restoreQr(item)}>恢复</Button> : <>
+              <Button size="small" disabled={busy} onClick={() => openRebind(item)}>重新绑定</Button>
+              <Button size="small" className="btn-danger" disabled={busy} onClick={() => deleteQr(item)}>删除</Button>
+            </>}
+          </span></td>
         </tr>)}</tbody>
       </table></div> : <Empty>还没有二维码，先在上方生成一批</Empty>}
     </article>
-    <p className="muted-note">使用流程：按楼层生成并下载标签 PDF → 打印张贴到设备 → 采集员小程序「扫码采集」扫描设备上的码完成建档绑定。「平台介绍页」建议单独打印张贴于楼栋公告栏。</p>
+    <p className="muted-note">使用流程：按学校、校区、楼栋和楼层生成标签 → 打印张贴 → 采集员扫码建档。重新绑定会保留二维码本身并转移到所选设施；删除后原标签立即失效。</p>
+    {rebindItem && createPortal(<FluentProvider theme={webLightTheme}><div className="dialog-backdrop" role="presentation">
+      <div className="resolve-dialog" role="dialog" aria-modal="true" aria-labelledby="qr-rebind-title">
+        <div><h2 id="qr-rebind-title">重新绑定二维码</h2><p>{hierarchyParts(rebindItem).join(' / ') || `NO.${String(rebindItem.serial_no).padStart(3, '0')}`}</p></div>
+        <div className="field"><Label htmlFor="qr-rebind-facility" required>目标设施</Label>
+          <select id="qr-rebind-facility" className="native-select" value={rebindFacilityId} onChange={event => setRebindFacilityId(event.target.value)}>
+            <option value="">请选择设施</option>
+            {facilityOptions.map(facility => <option key={facility.id} value={facility.id}>{facility.facilityNo} · {facility.name} · {[facility.campus, facility.building, facility.floor].filter(Boolean).join(' / ')}</option>)}
+          </select>
+        </div>
+        <div className="dialog-actions">
+          <Button appearance="secondary" disabled={busy} onClick={() => setRebindItem(null)}>取消</Button>
+          <Button appearance="primary" disabled={busy || !rebindFacilityId} onClick={submitRebind}>{busy ? '正在绑定…' : '确认重新绑定'}</Button>
+        </div>
+      </div>
+    </div></FluentProvider>, document.body)}
   </section>
 }
 function FacilityPage() {

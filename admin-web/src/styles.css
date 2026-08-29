@@ -71,6 +71,8 @@ button, input, select { font: inherit; }
 table { border-collapse: collapse; width: 100%; font-size: 14px; }
 th { text-align: left; color: #788791; font-weight: 500; padding: 8px 10px; border-bottom: 1px solid #e7ebed; }
 td { padding: 13px 10px; border-bottom: 1px solid #edf0f2; white-space: nowrap; }
+.select-cell { width: 38px; min-width: 38px; padding-left: 8px; padding-right: 4px; text-align: center; }
+.select-cell input { width: 16px; height: 16px; margin: 0; accent-color: #b42318; }
 td strong, td small { display: block; }
 td small { color: #87949c; font-size: 12px; margin-top: 4px; }
 .empty { min-height: 190px; display: grid; place-items: center; align-content: center; gap: 8px; color: #7c8a93; }

@@ -56,6 +56,14 @@ export const api = {
     return request(`/qr-codes${qs}`)
   },
   createQrBatch: (payload) => request('/qr-codes/batch', { method: 'POST', body: JSON.stringify(payload) }),
+  deleteQrCode: (id) => request(`/qr-codes/${id}`, { method: 'DELETE' }),
+  batchDeleteQrCodes: (ids) => request('/qr-codes/batch-delete', {
+    method: 'POST', body: JSON.stringify({ ids }),
+  }),
+  restoreQrCode: (id) => request(`/qr-codes/${id}/restore`, { method: 'POST' }),
+  rebindQrCode: (id, facilityId) => request(`/qr-codes/${id}/rebind`, {
+    method: 'POST', body: JSON.stringify({ facilityId }),
+  }),
   downloadQrLabelsPdf: (status = '', ids = []) => {
     const params = []
     if (status) params.push(`status=${status}`)
