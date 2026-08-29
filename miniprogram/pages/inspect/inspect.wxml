@@ -27,7 +27,10 @@
     </view>
     <view wx:for="{{items}}" wx:key="id" class="card check-card">
       <view class="row check-head">
-        <view class="check-name">{{item.item_name}}</view>
+        <view class="check-copy">
+          <view class="check-name">{{item.item_name}}</view>
+          <view wx:if="{{item.inspection_standard && item.inspection_standard !== item.item_name}}" class="check-standard">{{item.inspection_standard}}</view>
+        </view>
         <text wx:if="{{item.required_flag}}" class="required-mark">必检</text>
       </view>
       <view class="choice-row">

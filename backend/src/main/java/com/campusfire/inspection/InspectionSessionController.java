@@ -101,9 +101,18 @@ public class InspectionSessionController {
     }
 
     private void createRectificationIfNeeded(String recordId, Long taskId, Map<String, String> results) {
+        Map<String, String> labels = jdbcTemplate.query(
+                "SELECT item.item_code,item.item_name FROM inspection_task task " +
+                        "JOIN facility facility ON facility.id=task.facility_id " +
+                        "JOIN inspection_item item ON item.facility_type_id=facility.facility_type_id WHERE task.id=?",
+                resultSet -> {
+                    Map<String, String> values = new HashMap<>();
+                    while (resultSet.next()) values.put(resultSet.getString("item_code"), resultSet.getString("item_name"));
+                    return values;
+                }, taskId);
         List<String> abnormal = new ArrayList<>();
         for (Map.Entry<String, String> entry : results.entrySet()) {
-            if ("FAIL".equals(entry.getValue())) abnormal.add(entry.getKey() + ":FAIL");
+            if ("FAIL".equals(entry.getValue())) abnormal.add(labels.getOrDefault(entry.getKey(), entry.getKey()) + "异常");
         }
         if (abnormal.isEmpty()) return;
         Map<String, Object> task = jdbcTemplate.queryForMap("SELECT facility_id FROM inspection_task WHERE id=?", taskId);

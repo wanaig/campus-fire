@@ -198,6 +198,10 @@ function Dashboard({ user, onLogout }) {
             <div className="panel-head"><div><h2>设施类型分布</h2><p>各类消防设施在用情况</p></div></div>
             {(data.facilitySummary || []).length ? <div className="facility-list">{data.facilitySummary.map(item => <div key={item.facilityType}><div><strong>{item.facilityTypeName}</strong><span>{item.inUseCount || 0} 台在用</span></div><b>{item.totalCount || 0}</b></div>)}</div> : <Empty>暂无设施档案</Empty>}
           </article>
+          <article className="panel facility-panel">
+            <div className="panel-head"><div><h2>异常部件统计</h2><p>近{days}天巡检记录中异常最多的部件</p></div><Warning24Regular /></div>
+            {(data.componentIssueSummary || []).length ? <div className="facility-list">{data.componentIssueSummary.map(item => <div key={`${item.itemCode}:${item.itemName}`}><div><strong>{item.itemName}</strong><span>异常 {item.failCount} 次</span></div><b>{item.failCount}</b></div>)}</div> : <Empty>该时段内没有异常部件记录</Empty>}
+          </article>
           <article className="panel due-panel">
             <div className="panel-head"><div><h2>保养到期提醒</h2><p>未来30天内需要维护的设施</p></div><CalendarClock24Regular /></div>
             {(data.maintenanceDueFacilities || []).length ? <div className="table-wrap"><table><thead><tr><th>设施</th><th>位置</th><th>保养日期</th></tr></thead><tbody>{data.maintenanceDueFacilities.map(item => <tr key={item.id}><td><strong>{item.name}</strong><small>{item.facility_no}</small></td><td>{[item.campus, item.building, item.floor].filter(Boolean).join(' / ')}</td><td>{String(item.next_maintenance_at).slice(0, 10)}</td></tr>)}</tbody></table></div> : <Empty>未来30天没有设施需要保养</Empty>}
@@ -438,6 +442,10 @@ function FacilityPage() {
     try { setItems(await api.facilities(value)) } catch (cause) { setError(cause.message) } finally { setLoading(false) }
   }
   useEffect(() => { load(''); api.facilityTypes().then(setTypes).catch(() => {}) }, [])
+  function openCreate() {
+    setForm({ ...emptyForm, facilityType: types[0]?.typeCode || '' })
+    setDialog('new')
+  }
   function openEdit(item) {
     setForm({
       facilityNo: item.facilityNo || '', facilityType: item.facilityType || '', name: item.name || '',
@@ -464,7 +472,8 @@ function FacilityPage() {
     }
     setSubmitting(true); setError('')
     try {
-      await api.updateFacility(dialog.id, payload())
+      if (dialog === 'new') await api.createFacility(payload())
+      else await api.updateFacility(dialog.id, payload())
       setDialog(null); load()
     } catch (cause) { setError(cause.message) } finally { setSubmitting(false) }
   }
@@ -489,6 +498,7 @@ function FacilityPage() {
     <div className="work-toolbar">
       <Input size="large" value={keyword} onChange={(_, d) => setKeyword(d.value)} placeholder="输入设施编号、名称或位置" />
       <Button appearance="primary" onClick={() => load()}>查询</Button>
+      <Button appearance="primary" icon={<Add24Regular />} disabled={!types.length} onClick={openCreate}>新增设施</Button>
       <Button appearance="secondary" onClick={exportFacilities}>导出设施台账</Button>
       <Button icon={<Print24Regular />} appearance="secondary" disabled={!items.length || qrBusy} onClick={openQrSheet}>
         {qrBusy ? '正在生成…' : `下载二维码标签 PDF（${items.length} 个）`}
@@ -496,14 +506,14 @@ function FacilityPage() {
     </div>
     {error && <MessageBar intent="error"><MessageBarBody>{error}</MessageBarBody></MessageBar>}
     <article className="panel data-panel">
-      {loading ? <Spinner label="正在读取设施档案" /> : items.length ? <div className="table-wrap"><table><thead><tr><th>设施编号</th><th>设施名称</th><th>类型</th><th>安装位置</th><th>状态</th><th>预计更新</th><th>下次保养</th><th>操作</th></tr></thead><tbody>{items.map(item => <tr key={item.id}><td><strong>{item.facilityNo}</strong></td><td>{item.name}</td><td>{item.facilityType}</td><td>{[item.campus,item.building,item.floor,item.area,item.detailLocation].filter(Boolean).join(' / ')}</td><td><span className={`badge ${item.lifecycleStatus === 'IN_USE' ? 'ok' : ''}`}>{item.lifecycleStatus === 'IN_USE' ? '在用' : item.lifecycleStatus}</span></td><td>{item.expectedUpdateDate || '按规则确认'}</td><td>{item.nextMaintenanceAt ? String(item.nextMaintenanceAt).slice(0,10) : '未设置'}</td><td><span className="row-actions"><Button size="small" onClick={async()=>setHistory({facility:item,data:await api.facilityHistory(item.id)})}>历史</Button><Button size="small" onClick={()=>openEdit(item)}>编辑</Button>{item.lifecycleStatus === 'IN_USE' && <Button size="small" onClick={()=>setLifecycle(item)}>停用/报废</Button>}<Button size="small" className="btn-danger" onClick={()=>remove(item)}>删除</Button></span></td></tr>)}</tbody></table></div> : <Empty>没有找到符合条件的设施</Empty>}
+      {loading ? <Spinner label="正在读取设施档案" /> : items.length ? <div className="table-wrap"><table><thead><tr><th>设施编号</th><th>设施名称</th><th>类型</th><th>安装位置</th><th>状态</th><th>预计更新</th><th>下次保养</th><th>操作</th></tr></thead><tbody>{items.map(item => <tr key={item.id}><td><strong>{item.facilityNo}</strong></td><td>{item.name}</td><td>{types.find(type => type.typeCode === item.facilityType)?.typeName || item.facilityType}</td><td>{[item.campus,item.building,item.floor,item.area,item.detailLocation].filter(Boolean).join(' / ')}</td><td><span className={`badge ${item.lifecycleStatus === 'IN_USE' ? 'ok' : ''}`}>{item.lifecycleStatus === 'IN_USE' ? '在用' : item.lifecycleStatus}</span></td><td>{item.expectedUpdateDate || '按规则确认'}</td><td>{item.nextMaintenanceAt ? String(item.nextMaintenanceAt).slice(0,10) : '未设置'}</td><td><span className="row-actions"><Button size="small" onClick={async()=>setHistory({facility:item,data:await api.facilityHistory(item.id)})}>历史</Button><Button size="small" onClick={()=>openEdit(item)}>编辑</Button>{item.lifecycleStatus === 'IN_USE' && <Button size="small" onClick={()=>setLifecycle(item)}>停用/报废</Button>}<Button size="small" className="btn-danger" onClick={()=>remove(item)}>删除</Button></span></td></tr>)}</tbody></table></div> : <Empty>没有找到符合条件的设施</Empty>}
     </article>
     {history && createPortal(<FluentProvider theme={webLightTheme}><div className="dialog-backdrop" role="presentation"><div className="form-dialog" role="dialog" aria-modal="true"><h2>{history.facility.name} 历史记录</h2><p>巡检 {history.data.inspections?.length || 0} 次，维护 {history.data.maintenance?.length || 0} 次，状态变更 {history.data.lifecycle?.length || 0} 次。</p><div className="table-wrap"><table><tbody>{(history.data.inspections || []).slice(0,8).map(row=><tr key={'i'+row.id}><td>巡检</td><td>{String(row.submitted_at).replace('T',' ').slice(0,16)}</td><td>{row.inspector || '—'}，照片 {row.photo_count || 0} 张</td></tr>)}{(history.data.maintenance || []).slice(0,8).map(row=><tr key={'m'+row.id}><td>维护</td><td>{String(row.maintenance_at).replace('T',' ').slice(0,16)}</td><td>{row.maintainer}：{row.result_note}</td></tr>)}</tbody></table></div><div className="dialog-actions"><Button appearance="primary" onClick={()=>setHistory(null)}>关闭</Button></div></div></div></FluentProvider>, document.body)}
     {lifecycle && createPortal(<FluentProvider theme={webLightTheme}><div className="dialog-backdrop" role="presentation"><div className="resolve-dialog" role="dialog" aria-modal="true"><h2>变更设施状态</h2><p>{lifecycle.name}</p><select className="native-select" defaultValue="SUSPENDED" id="life-event"><option value="SUSPENDED">暂停使用/维修</option><option value="RETIRED">停用</option><option value="SCRAPPED">报废</option><option value="RESTORED">恢复使用</option></select><Textarea value={lifecycleNote} onChange={(_,d)=>setLifecycleNote(d.value)} placeholder="请填写变更原因" /><div className="dialog-actions"><Button appearance="secondary" onClick={()=>setLifecycle(null)}>取消</Button><Button appearance="primary" onClick={async()=>{if(!lifecycleNote.trim())return setError('请填写状态变更原因'); await api.changeFacilityLifecycle(lifecycle.id,document.getElementById('life-event').value,lifecycleNote.trim()); setLifecycle(null);setLifecycleNote('');load()}}>确认变更</Button></div></div></div></FluentProvider>, document.body)}
     {dialog && createPortal(<FluentProvider theme={webLightTheme}><div className="dialog-backdrop" role="presentation"><div className="form-dialog" role="dialog" aria-modal="true" aria-labelledby="facility-dialog-title">
-      <div><h2 id="facility-dialog-title">编辑设施 {dialog.facilityNo}</h2><p>带 * 为必填项，位置信息用于保安现场定位与扫码巡检。新设施档案由采集员扫码建档。</p></div>
+      <div><h2 id="facility-dialog-title">{dialog === 'new' ? '新增设施档案' : `编辑设施 ${dialog.facilityNo}`}</h2><p>带 * 为必填项，位置信息用于保安现场定位与扫码巡检。</p></div>
       <div className="form-grid">
-        <div className="field"><Label>设施编号</Label><Input value={form.facilityNo} disabled /></div>
+        <div className="field"><Label required>设施编号</Label><Input value={form.facilityNo} disabled={dialog !== 'new'} onChange={(_, d) => setForm({ ...form, facilityNo: d.value })} placeholder="例如 HYD-001" /></div>
         <div className="field"><Label required>设施类型</Label>
           <select className="native-select" value={form.facilityType} onChange={event => setForm({ ...form, facilityType: event.target.value })}>
             {types.map(t => <option key={t.typeCode} value={t.typeCode}>{t.typeName}</option>)}
@@ -567,17 +577,24 @@ function InspectionRecordsPage() {
       {loading ? <Spinner label="正在读取巡检记录" /> : items.length ? <div className="table-wrap"><table>
         <thead><tr><th>设施</th><th>位置</th><th>巡检人员</th><th>提交时间</th><th>照片</th><th>检查结果</th><th>备注</th><th>操作</th></tr></thead>
         <tbody>{items.map(item => {
-          let results = []
-          try { results = typeof item.results_json === 'string' ? JSON.parse(item.results_json) : (item.results_json || []) } catch (_) {}
-          const abnormal = Array.isArray(results) ? results.filter(result => result.result === 'ABNORMAL' || result.status === 'ABNORMAL') : []
+          let results = Array.isArray(item.results) ? item.results : []
+          if (!results.length) {
+            try {
+              const raw = typeof item.results_json === 'string' ? JSON.parse(item.results_json) : item.results_json
+              if (raw && !Array.isArray(raw)) results = Object.entries(raw).map(([code, status]) => ({ code, name: code, status }))
+            } catch (_) {}
+          }
+          const abnormal = results.filter(result => String(result.status).toUpperCase() === 'FAIL' || String(result.status).toUpperCase() === 'ABNORMAL')
           return <tr key={item.id} className={item.void_reason ? 'text-danger' : ''}>
             <td><strong>{item.name}</strong><small>{item.facility_no}</small></td>
             <td>{[item.campus, item.building, item.floor, item.area].filter(Boolean).join(' / ') || '—'}</td>
             <td>{item.inspector || '—'}</td>
             <td>{item.submitted_at ? String(item.submitted_at).replace('T', ' ').slice(0, 16) : '—'}</td>
             <td>{Number(item.photo_count) || 0} 张</td>
-            <td><span className={`badge ${item.void_reason ? 'warn' : abnormal.length ? 'warn' : 'ok'}`}>{item.void_reason ? '已作废' : abnormal.length ? `异常 ${abnormal.length} 项` : '全部正常'}</span></td>
-            <td className="issue-cell">{item.void_reason ? `作废原因：${item.void_reason}` : item.note || (abnormal.length ? abnormal.map(result => result.note || result.itemName || '异常').join('；') : '—')}</td>
+            <td><span className={`badge ${item.void_reason ? 'warn' : abnormal.length ? 'warn' : 'ok'}`}>{item.void_reason ? '已作废' : abnormal.length ? `异常 ${abnormal.length} 项` : '全部正常'}</span>
+              {results.length > 0 && <div className="result-chips">{results.map(result => <span key={result.code} className={`result-chip ${String(result.status).toUpperCase() === 'FAIL' ? 'fail' : ''}`}>{String(result.status).toUpperCase() === 'FAIL' ? '✗' : '✓'} {result.name}</span>)}</div>}
+            </td>
+            <td className="issue-cell">{item.void_reason ? `作废原因：${item.void_reason}` : item.note || (abnormal.length ? `异常部件：${abnormal.map(result => result.name).join('、')}` : '—')}</td>
             <td>{item.void_reason ? '—' : <Button size="small" className="btn-danger" onClick={() => { setVoiding(item); setVoidReason('') }}>作废</Button>}</td>
           </tr>
         })}</tbody>
@@ -1335,33 +1352,41 @@ function InspectionItemsPage() {
   const [error, setError] = useState('')
   const [dialog, setDialog] = useState(null)
   const [submitting, setSubmitting] = useState(false)
-  const emptyForm = { itemCode: '', itemName: '', requiredFlag: true, sortOrder: '0', enabled: true }
+  const [typeManager, setTypeManager] = useState(false)
+  const [typeEditing, setTypeEditing] = useState(null)
+  const [typeSubmitting, setTypeSubmitting] = useState(false)
+  const emptyForm = { itemCode: '', itemName: '', inspectionStandard: '', requiredFlag: true, sortOrder: '0', enabled: true }
+  const emptyTypeForm = { typeCode: '', typeName: '' }
   const [form, setForm] = useState(emptyForm)
+  const [typeForm, setTypeForm] = useState(emptyTypeForm)
   async function load(code = typeCode) {
     if (!code) return
     setLoading(true); setError('')
     try { setItems(await api.inspectionItems(code)) } catch (cause) { setError(cause.message) } finally { setLoading(false) }
   }
-  useEffect(() => {
-    api.facilityTypes().then(list => {
-      setTypes(list)
-      if (list.length) { setTypeCode(list[0].typeCode); load(list[0].typeCode) }
-    }).catch(cause => setError(cause.message))
-  }, [])
+  async function refreshTypes(preferredCode = typeCode) {
+    const list = await api.managedFacilityTypes()
+    setTypes(list)
+    const nextCode = list.some(type => type.typeCode === preferredCode) ? preferredCode : (list[0]?.typeCode || '')
+    setTypeCode(nextCode)
+    if (nextCode) await load(nextCode)
+    else setItems([])
+  }
+  useEffect(() => { refreshTypes('').catch(cause => setError(cause.message)) }, [])
   function openCreate() { setForm(emptyForm); setDialog('new') }
   function openEdit(item) {
     setForm({
-      itemCode: item.item_code || '', itemName: item.item_name || '',
+      itemCode: item.item_code || '', itemName: item.item_name || '', inspectionStandard: item.inspection_standard || '',
       requiredFlag: item.required_flag === 1, sortOrder: String(item.sort_order ?? '0'),
       enabled: item.enabled === 1,
     })
     setDialog(item)
   }
   async function submit() {
-    if (!form.itemCode.trim() || !form.itemName.trim()) return setError('请填写检查项编号和名称')
+    if (!form.itemCode.trim() || !form.itemName.trim() || !form.inspectionStandard.trim()) return setError('请填写检查项编号、部件名称和检查标准')
     setSubmitting(true); setError('')
     const payload = {
-      facilityType: typeCode, itemCode: form.itemCode.trim(), itemName: form.itemName.trim(),
+      facilityType: typeCode, itemCode: form.itemCode.trim(), itemName: form.itemName.trim(), inspectionStandard: form.inspectionStandard.trim(),
       requiredFlag: form.requiredFlag, sortOrder: form.sortOrder ? Number(form.sortOrder) : 0,
     }
     try {
@@ -1374,20 +1399,39 @@ function InspectionItemsPage() {
     if (!window.confirm(`确定删除检查项「${item.item_name}」吗？`)) return
     try { await api.deleteInspectionItem(item.id); load() } catch (cause) { setError(cause.message) }
   }
+  function openTypeCreate() { setTypeEditing('new'); setTypeForm(emptyTypeForm) }
+  function openTypeEdit(type) { setTypeEditing(type); setTypeForm({ typeCode: type.typeCode, typeName: type.typeName }) }
+  async function submitType() {
+    if (!typeForm.typeCode.trim() || !typeForm.typeName.trim()) return setError('请填写设施类型编号和名称')
+    setTypeSubmitting(true); setError('')
+    try {
+      const saved = typeEditing === 'new'
+        ? await api.createFacilityType(typeForm)
+        : await api.updateFacilityType(typeEditing.id, typeForm)
+      setTypeEditing(null); setTypeForm(emptyTypeForm)
+      await refreshTypes(saved.typeCode)
+    } catch (cause) { setError(cause.message) } finally { setTypeSubmitting(false) }
+  }
+  async function removeType(type) {
+    if (!window.confirm(`确定删除设施类型「${type.typeName}」吗？有关联数据时系统会阻止删除。`)) return
+    try { await api.deleteFacilityType(type.id); await refreshTypes(typeCode === type.typeCode ? '' : typeCode) } catch (cause) { setError(cause.message) }
+  }
   return <section className="work-page">
     <div className="work-toolbar">
       <select className="native-select" value={typeCode} onChange={event => { setTypeCode(event.target.value); load(event.target.value) }} aria-label="设施类型筛选">
         {types.map(t => <option key={t.typeCode} value={t.typeCode}>{t.typeName}</option>)}
       </select>
-      <Button appearance="primary" icon={<Add24Regular />} onClick={openCreate}>新增检查项</Button>
+      <Button appearance="primary" icon={<Add24Regular />} disabled={!typeCode} onClick={openCreate}>新增检查项</Button>
+      <Button appearance="secondary" onClick={() => { setTypeManager(true); setTypeEditing(null) }}>设施类型管理</Button>
     </div>
     {error && <MessageBar intent="error"><MessageBarBody>{error}</MessageBarBody></MessageBar>}
     <article className="panel data-panel">
       {loading ? <Spinner label="正在读取巡检检查项" /> : items.length ? <div className="table-wrap"><table>
-        <thead><tr><th>检查项编号</th><th>检查项名称</th><th>是否必检</th><th>排序</th><th>状态</th><th>操作</th></tr></thead>
+        <thead><tr><th>检查项编号</th><th>部件名称</th><th>检查标准</th><th>是否必检</th><th>排序</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>{items.map(item => <tr key={item.id}>
           <td><strong>{item.item_code}</strong></td>
           <td>{item.item_name}</td>
+          <td>{item.inspection_standard || '—'}</td>
           <td>{item.required_flag ? '必检' : '选检'}</td>
           <td>{item.sort_order}</td>
           <td><span className={`badge ${item.enabled ? 'ok' : ''}`}>{item.enabled ? '启用' : '停用'}</span></td>
@@ -1399,7 +1443,8 @@ function InspectionItemsPage() {
       <div><h2 id="item-title">{dialog === 'new' ? '新增巡检检查项' : '编辑巡检检查项'}</h2><p>检查项是保安扫码巡检时逐项确认的内容，停用后不再出现在巡检清单中。</p></div>
       <div className="form-grid">
         <div className="field"><Label htmlFor="item-code" required>检查项编号</Label><Input id="item-code" value={form.itemCode} onChange={(_, d) => setForm({ ...form, itemCode: d.value })} placeholder="例如 PRESSURE_CHECK" /></div>
-        <div className="field"><Label htmlFor="item-name" required>检查项名称</Label><Input id="item-name" value={form.itemName} onChange={(_, d) => setForm({ ...form, itemName: d.value })} placeholder="例如 压力表指针在绿区" /></div>
+        <div className="field"><Label htmlFor="item-name" required>部件名称</Label><Input id="item-name" value={form.itemName} onChange={(_, d) => setForm({ ...form, itemName: d.value })} placeholder="例如 箱门、水带、枪头" /></div>
+        <div className="field span2"><Label htmlFor="item-standard" required>检查标准</Label><Textarea id="item-standard" value={form.inspectionStandard} onChange={(_, d) => setForm({ ...form, inspectionStandard: d.value })} placeholder="例如 箱门完好、开启正常，玻璃和标识清晰" /></div>
         <div className="field"><Label htmlFor="item-required">是否必检</Label>
           <select id="item-required" className="native-select" value={form.requiredFlag ? '1' : '0'} onChange={event => setForm({ ...form, requiredFlag: event.target.value === '1' })}>
             <option value="1">必检</option><option value="0">选检</option>
@@ -1413,6 +1458,16 @@ function InspectionItemsPage() {
         </div>}
       </div>
       <div className="dialog-actions"><Button appearance="secondary" onClick={() => setDialog(null)}>取消</Button><Button appearance="primary" disabled={submitting} onClick={submit}>{submitting ? '正在保存' : '保存'}</Button></div>
+    </div></div></FluentProvider>, document.body)}
+    {typeManager && createPortal(<FluentProvider theme={webLightTheme}><div className="dialog-backdrop" role="presentation"><div className="form-dialog" role="dialog" aria-modal="true" aria-labelledby="facility-type-title">
+      <div><h2 id="facility-type-title">设施类型管理</h2><p>新增类型后可用于设施建档、巡检计划和检查项配置。有关联数据的类型不能直接删除。</p></div>
+      {typeEditing ? <div className="form-grid">
+        <div className="field"><Label htmlFor="type-code" required>类型编号</Label><Input id="type-code" value={typeForm.typeCode} onChange={(_, d) => setTypeForm({ ...typeForm, typeCode: d.value })} placeholder="例如 FIRE_DOOR" /></div>
+        <div className="field"><Label htmlFor="type-name" required>类型名称</Label><Input id="type-name" value={typeForm.typeName} onChange={(_, d) => setTypeForm({ ...typeForm, typeName: d.value })} placeholder="例如 防火门" /></div>
+        <div className="dialog-actions span2"><Button appearance="secondary" onClick={() => setTypeEditing(null)}>取消编辑</Button><Button appearance="primary" disabled={typeSubmitting} onClick={submitType}>{typeSubmitting ? '正在保存' : '保存类型'}</Button></div>
+      </div> : <Button appearance="primary" icon={<Add24Regular />} onClick={openTypeCreate}>新增设施类型</Button>}
+      <div className="table-wrap"><table><thead><tr><th>类型编号</th><th>类型名称</th><th>操作</th></tr></thead><tbody>{types.map(type => <tr key={type.id}><td><strong>{type.typeCode}</strong></td><td>{type.typeName}</td><td><span className="row-actions"><Button size="small" onClick={() => openTypeEdit(type)}>编辑</Button><Button size="small" className="btn-danger" onClick={() => removeType(type)}>删除</Button></span></td></tr>)}</tbody></table></div>
+      <div className="dialog-actions"><Button appearance="primary" onClick={() => { setTypeManager(false); setTypeEditing(null) }}>完成</Button></div>
     </div></div></FluentProvider>, document.body)}
   </section>
 }

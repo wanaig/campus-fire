@@ -69,6 +69,15 @@
     </view>
 
     <view class="card">
+      <view class="card-title">异常部件统计（{{trendDays}}天内）</view>
+      <view wx:if="{{!componentIssues.length}}" class="muted">该时段内没有异常部件记录</view>
+      <view wx:for="{{componentIssues}}" wx:key="index" class="dist-row">
+        <view class="type-name">{{item.itemName}}</view>
+        <view class="badge danger">异常 {{item.failCount}} 次</view>
+      </view>
+    </view>
+
+    <view class="card">
       <view class="card-title">设施类型分布</view>
       <view wx:if="{{!facilityRows.length}}" class="muted">暂无设施数据</view>
       <view wx:for="{{facilityRows}}" wx:key="facilityType" class="dist-row">

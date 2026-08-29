@@ -46,6 +46,7 @@ export const api = {
   overview: (days = 30) => request(`/dashboard/overview?trendDays=${days}`),
   rectifications: () => request('/dashboard/rectifications'),
   facilities: (keyword = '') => request(`/facilities?keyword=${encodeURIComponent(keyword)}`),
+  createFacility: (facility) => request('/facilities', { method: 'POST', body: JSON.stringify(facility) }),
   updateFacility: (id, facility) => request(`/facilities/${id}`, { method: 'PUT', body: JSON.stringify(facility) }),
   deleteFacility: (id) => request(`/facilities/${id}`, { method: 'DELETE' }),
   qrCodes: (status = '', keyword = '') => {
@@ -80,6 +81,10 @@ export const api = {
   deleteMaintenanceRecord: (id) => request(`/maintenance-records/${id}`, { method: 'DELETE' }),
   facilityImportTemplateUrl: () => `${API_BASE}/facility-operations/template`,
   facilityTypes: () => request('/facilities/types'),
+  managedFacilityTypes: () => request('/facility-types'),
+  createFacilityType: (facilityType) => request('/facility-types', { method: 'POST', body: JSON.stringify(facilityType) }),
+  updateFacilityType: (id, facilityType) => request(`/facility-types/${id}`, { method: 'PUT', body: JSON.stringify(facilityType) }),
+  deleteFacilityType: (id) => request(`/facility-types/${id}`, { method: 'DELETE' }),
   facilityUpdateRules: () => request('/facility-update-rules'),
   createFacilityUpdateRule: (rule) => request('/facility-update-rules', { method: 'POST', body: JSON.stringify(rule) }),
   updateFacilityUpdateRule: (id, rule) => request(`/facility-update-rules/${id}`, { method: 'PUT', body: JSON.stringify(rule) }),

@@ -9,13 +9,24 @@
 .offline-hint { margin-top: 14rpx; padding: 14rpx 16rpx; border-radius: 10rpx; background: #fff2d6; color: #815c00; line-height: 1.6; }
 .check-head {
   margin-bottom: 18rpx;
+  align-items: flex-start;
+}
+.check-copy {
+  flex: 1;
+  min-width: 0;
 }
 .check-name {
   font-size: 31rpx;
   font-weight: 600;
-  flex: 1;
 }
 .page-large .check-name { font-size: 37rpx; }
+.check-standard {
+  margin-top: 8rpx;
+  color: #66737d;
+  font-size: 25rpx;
+  line-height: 1.55;
+}
+.page-large .check-standard { font-size: 30rpx; }
 .required-mark {
   font-size: 22rpx;
   color: #b42318;

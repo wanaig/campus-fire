@@ -3,6 +3,7 @@ package com.campusfire.dashboard;
 import com.campusfire.auth.AuthService;
 import com.campusfire.auth.AuthenticatedUser;
 import com.campusfire.common.api.ApiResponse;
+import com.campusfire.inspection.InspectionResultSupport;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
@@ -12,7 +13,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,10 +26,12 @@ import java.util.Map;
 public class DashboardController {
     private final JdbcTemplate jdbcTemplate;
     private final AuthService authService;
+    private final InspectionResultSupport resultSupport;
 
-    public DashboardController(JdbcTemplate jdbcTemplate, AuthService authService) {
+    public DashboardController(JdbcTemplate jdbcTemplate, AuthService authService, InspectionResultSupport resultSupport) {
         this.jdbcTemplate = jdbcTemplate;
         this.authService = authService;
+        this.resultSupport = resultSupport;
     }
 
     @GetMapping("/overview")
@@ -48,7 +54,42 @@ public class DashboardController {
                 "SELECT id,facility_no,name,campus,building,floor,area,next_maintenance_at FROM facility WHERE next_maintenance_at IS NOT NULL AND next_maintenance_at<=DATE_ADD(NOW(),INTERVAL 30 DAY) ORDER BY next_maintenance_at LIMIT 100"));
         data.put("inspectionTrend", jdbcTemplate.queryForList(
                 "SELECT DATE(submitted_at) AS date,COUNT(*) AS completedCount FROM inspection_record WHERE submitted_at>=DATE_SUB(CURDATE(),INTERVAL ? DAY) GROUP BY DATE(submitted_at) ORDER BY date", days));
+        data.put("componentIssueSummary", componentIssueSummary(days));
         return ApiResponse.success(data);
+    }
+
+    /** 近 N 天巡检记录中异常部件分布，与检查项配置联动（如消火栓六部件） */
+    private List<Map<String, Object>> componentIssueSummary(int days) {
+        List<Map<String, Object>> records = jdbcTemplate.queryForList(
+                "SELECT f.facility_type_id,r.results_json FROM inspection_record r " +
+                        "JOIN inspection_task t ON t.id=r.task_id JOIN facility f ON f.id=t.facility_id " +
+                        "WHERE r.submitted_at>=DATE_SUB(CURDATE(),INTERVAL ? DAY)", days);
+        if (records.isEmpty()) return Collections.emptyList();
+        Map<Long, LinkedHashMap<String, String>> typeLabels = resultSupport.loadItemLabels();
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        Map<String, String> names = new HashMap<>();
+        Map<String, String> codes = new HashMap<>();
+        for (Map<String, Object> record : records) {
+            Long typeId = ((Number) record.get("facility_type_id")).longValue();
+            Map<String, String> labels = typeLabels.getOrDefault(typeId, new LinkedHashMap<>());
+            for (Map.Entry<String, String> entry : resultSupport.parseResults(record.get("results_json")).entrySet()) {
+                if (!"FAIL".equals(entry.getValue())) continue;
+                String key = typeId + ":" + entry.getKey();
+                counts.merge(key, 1, Integer::sum);
+                names.putIfAbsent(key, labels.getOrDefault(entry.getKey(), entry.getKey()));
+                codes.putIfAbsent(key, entry.getKey());
+            }
+        }
+        List<Map<String, Object>> summary = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : counts.entrySet()) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("itemCode", codes.get(entry.getKey()));
+            item.put("itemName", names.get(entry.getKey()));
+            item.put("failCount", entry.getValue());
+            summary.add(item);
+        }
+        summary.sort(Comparator.comparingInt(item -> -((Integer) item.get("failCount"))));
+        return summary.size() > 8 ? summary.subList(0, 8) : summary;
     }
 
     @GetMapping("/rectifications")
