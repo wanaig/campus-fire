@@ -3,7 +3,8 @@
 param(
     [string]$BaseUrl = "http://localhost:8080/api",
     [string]$AdminPassword = "123456",
-    [string]$GuardPassword = "Guard@123"
+    [string]$GuardUser = "guard01",
+    [string]$GuardPassword = "123456"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -57,7 +58,7 @@ $newLogin = Invoke-Api POST '/auth/login' $null @{ username = $e2eUser; password
 Assert-True ($newLogin.data.user.roleCode -eq 'GUARD') "新建账号可登录"
 
 # 5. 保安登录并获取任务
-$guard = Invoke-Api POST '/auth/login' $null @{ username = 'guard'; password = $GuardPassword }
+$guard = Invoke-Api POST '/auth/login' $null @{ username = $GuardUser; password = $GuardPassword }
 $guardToken = $guard.data.accessToken
 Assert-True ($guard.data.user.roleCode -eq 'GUARD') "保安登录"
 $pending = Invoke-Api GET '/inspection/tasks?status=PENDING' $guardToken
@@ -109,8 +110,17 @@ $draftCount = @($loaded.data.results.PSObject.Properties).Count
 Assert-True ($draftCount -eq $enabledItems.Count) "草稿保存并回读（$draftCount 项）"
 
 # 11. 现场照片上传（仅相机来源、JPEG 校验）
+# 构造真实 JPEG：水印服务会解码原图重绘，纯标记字节的假 JPEG 无法通过校验
+Add-Type -AssemblyName System.Drawing
+$bmp = New-Object System.Drawing.Bitmap 320, 240
+$graphic = [System.Drawing.Graphics]::FromImage($bmp)
+$graphic.Clear([System.Drawing.Color]::White)
+$graphic.Dispose()
+$stream = New-Object System.IO.MemoryStream
+$bmp.Save($stream, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+$bmp.Dispose()
 $jpeg = Join-Path $env:TEMP "e2e-photo.jpg"
-[IO.File]::WriteAllBytes($jpeg, ([byte[]](0xFF, 0xD8, 0xFF, 0xE0) + (New-Object byte[] 120)))
+[IO.File]::WriteAllBytes($jpeg, $stream.ToArray())
 $photo = & curl.exe -s -X POST "$BaseUrl/inspection/sessions/$sessionId/photos" `
     -H "Authorization: Bearer $guardToken" `
     -F "file=@$jpeg;type=image/jpeg" `
@@ -131,24 +141,89 @@ try {
 } catch { $albumError = 'rejected' }
 Assert-True ($albumError -eq 'rejected') "相册来源照片被拒绝"
 
-# 12. 提交巡检
+# 12. 采集员设施初始照片（上传/防造假约束/权限/清单/删除）
+$e2eCollector = "e2e-collector-{0:x}" -f (Get-Random -Maximum 65536)
+Invoke-Api POST '/users' $adminToken @{ username = $e2eCollector; displayName = '联调测试采集员'; password = 'E2eCollector@123'; roleCode = 'COLLECTOR' } | Out-Null
+$collector = Invoke-Api POST '/auth/login' $null @{ username = $e2eCollector; password = 'E2eCollector@123' }
+$collectorToken = $collector.data.accessToken
+Assert-True ($collector.data.user.roleCode -eq 'COLLECTOR') "采集员账号登录"
+
+$facilityPhoto = & curl.exe -s -X POST "$BaseUrl/facilities/$($facility.id)/photos" `
+    -H "Authorization: Bearer $collectorToken" `
+    -F "file=@$jpeg;type=image/jpeg" `
+    -F "captureSource=CAMERA" `
+    -F "clientCapturedAt=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))" `
+    -F "deviceId=e2e-device" -F "latitude=$lat" -F "longitude=$lon" | ConvertFrom-Json
+Assert-True ($facilityPhoto.data.photoId -and $facilityPhoto.data.sha256.Length -eq 64) "设施初始照片上传（含 SHA-256 留痕）"
+
+$facilityAlbumError = $null
+try {
+    $badFacility = & curl.exe -s -X POST "$BaseUrl/facilities/$($facility.id)/photos" `
+        -H "Authorization: Bearer $collectorToken" `
+        -F "file=@$jpeg;type=image/jpeg" `
+        -F "captureSource=ALBUM" `
+        -F "clientCapturedAt=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))" `
+        -F "deviceId=e2e-device" -F "latitude=$lat" -F "longitude=$lon" | ConvertFrom-Json
+    if ($badFacility.code -ne 'OK') { $facilityAlbumError = 'rejected' }
+} catch { $facilityAlbumError = 'rejected' }
+Assert-True ($facilityAlbumError -eq 'rejected') "设施相册来源照片被拒绝"
+
+$stalePhotoError = $null
+try {
+    $staleFacility = & curl.exe -s -X POST "$BaseUrl/facilities/$($facility.id)/photos" `
+        -H "Authorization: Bearer $collectorToken" `
+        -F "file=@$jpeg;type=image/jpeg" `
+        -F "captureSource=CAMERA" `
+        -F "clientCapturedAt=2020-01-01T00:00:00Z" `
+        -F "deviceId=e2e-device" -F "latitude=$lat" -F "longitude=$lon" | ConvertFrom-Json
+    if ($staleFacility.code -ne 'OK') { $stalePhotoError = 'rejected' }
+} catch { $stalePhotoError = 'rejected' }
+Assert-True ($stalePhotoError -eq 'rejected') "超时设施照片被拒绝"
+
+$guardUploadError = $null
+try {
+    $guardUpload = & curl.exe -s -X POST "$BaseUrl/facilities/$($facility.id)/photos" `
+        -H "Authorization: Bearer $guardToken" `
+        -F "file=@$jpeg;type=image/jpeg" `
+        -F "captureSource=CAMERA" `
+        -F "clientCapturedAt=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))" `
+        -F "deviceId=e2e-device" -F "latitude=$lat" -F "longitude=$lon" | ConvertFrom-Json
+    if ($guardUpload.code -ne 'OK') { $guardUploadError = 'rejected' }
+} catch { $guardUploadError = 'rejected' }
+Assert-True ($guardUploadError -eq 'rejected') "保安账号不能上传设施初始照片"
+
+$facilityPhotos = Invoke-Api GET "/facilities/$($facility.id)/photos" $collectorToken
+$matchedPhoto = @($facilityPhotos.data) | Where-Object { $_.photoId -eq $facilityPhoto.data.photoId }
+Assert-True ($matchedPhoto.Count -eq 1) "设施初始照片清单（$(@($facilityPhotos.data).Count) 张）"
+
+$facilitiesAfterPhoto = Invoke-Api GET "/facilities?keyword=$([uri]::EscapeDataString($task.facility_no))" $adminToken
+$facilityAfterPhoto = $facilitiesAfterPhoto.data | Where-Object { $_.facilityNo -eq $task.facility_no } | Select-Object -First 1
+Assert-True ($facilityAfterPhoto.photoCount -ge 1) "设施列表返回初始照片数（$($facilityAfterPhoto.photoCount) 张）"
+
+$photoStatus = & curl.exe -s -o (Join-Path $env:TEMP "e2e-facility-photo.jpg") -w "%{http_code}" "$BaseUrl/facility-photos/$($facilityPhoto.data.photoId)/file"
+Assert-True ($photoStatus -eq '200') "设施初始照片文件免登录可读（访客查看）"
+
+$removed = Invoke-Api DELETE "/facility-photos/$($facilityPhoto.data.photoId)" $collectorToken
+Assert-True ($removed.data.deleted) "采集员删除设施初始照片"
+
+# 13. 提交巡检
 $submit = Invoke-Api POST "/inspection/sessions/$sessionId/submit" $guardToken
 Assert-True ($submit.data.photoCount -ge 1) "提交巡检记录（照片 $($submit.data.photoCount) 张）"
 
-# 13. 异常自动生成整改单
+# 14. 异常自动生成整改单
 Start-Sleep -Milliseconds 300
 $rects = Invoke-Api GET '/rectifications?status=OPEN' $guardToken
 $rect = $rects.data | Where-Object { $_.task_id -eq $task.id } | Select-Object -First 1
 Assert-True ($null -ne $rect) "异常自动生成整改单"
 Assert-True ($rect.issue_summary -match 'FAIL|异常|不合格') "整改单包含异常内容"
 
-# 14. 管理员关闭整改单
+# 15. 管理员关闭整改单
 $resolved = Invoke-Api POST "/rectifications/$($rect.id)/resolve" $adminToken @{ resolutionNote = '已更换器材并复检合格' }
 Assert-True ($resolved.data.resolved) "整改单闭环"
 $taskAfter = Invoke-Api GET '/inspection/tasks?status=COMPLETED' $guardToken
 Assert-True (($taskAfter.data | Where-Object { $_.id -eq $task.id }) -ne $null) "任务状态已完成"
 
-# 15. 看板统计
+# 16. 看板统计
 $overview = Invoke-Api GET '/dashboard/overview?trendDays=7' $adminToken
 Assert-True ($overview.data.inspectionTrend.Count -ge 1) "看板巡检趋势统计"
 Assert-True ($overview.data.facilityTotal -ge 1) "看板设施总数（$($overview.data.facilityTotal)）"

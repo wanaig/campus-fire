@@ -1,0 +1,64 @@
+.page-head {
+  margin-bottom: 24rpx;
+}
+.hello {
+  font-size: 42rpx;
+  font-weight: 700;
+}
+.page-large .hello { font-size: 50rpx; }
+.facility-name {
+  flex: 1;
+  margin-right: 12rpx;
+}
+.due-row {
+  margin-top: 16rpx;
+}
+.overdue {
+  color: #b42318;
+}
+.retry-btn {
+  margin-top: 24rpx;
+  padding: 12rpx 40rpx;
+}
+.record-item-head {
+  align-items: flex-start;
+}
+.record-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-top: 12rpx;
+}
+.record-chip {
+  font-size: 24rpx;
+  line-height: 1;
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  background: #eef6ee;
+  color: #1c7a35;
+  border: 2rpx solid #d3e8d6;
+}
+.page-large .record-chip { font-size: 30rpx; }
+.record-chip.fail {
+  background: #fdecec;
+  color: #b42318;
+  border-color: #f3c4bf;
+}
+.record-photo {
+  margin-top: 10rpx;
+  font-size: 24rpx;
+}
+.page-large .record-photo { font-size: 30rpx; }
+.photo-link {
+  margin-top: 10rpx;
+  font-size: 26rpx;
+  color: #2b5f8f;
+  text-decoration: underline;
+}
+.page-large .photo-link { font-size: 32rpx; }
+.rect-note {
+  margin-top: 10rpx;
+  color: #45545e;
+  font-size: 26rpx;
+}
+.page-large .rect-note { font-size: 32rpx; }

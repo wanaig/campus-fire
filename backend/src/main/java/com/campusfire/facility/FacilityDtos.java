@@ -18,9 +18,11 @@ public final class FacilityDtos {
         @NotBlank(message = "请输入楼栋") public String building;
         @NotBlank(message = "请输入楼层") public String floor;
         @NotBlank(message = "请输入区域") public String area;
-        @NotBlank(message = "请输入详细位置") public String detailLocation;
+        /** 小程序采集端不再采集详细位置，允许为空；管理端表单仍自行校验必填 */
+        public String detailLocation;
         public BigDecimal latitude;
         public BigDecimal longitude;
+        public BigDecimal locationAccuracyMeters;
         public String qrToken;
         public String brand;
         public String model;
@@ -33,7 +35,8 @@ public final class FacilityDtos {
     }
 
     public static class UpdateRequest extends CreateRequest {
-        @NotNull(message = "设施编号不能为空") public Long id;
+        /** 资源 id 取自 URL 路径：控制器在参数绑定后才回填该字段，因此这里不能加 @NotNull（校验先于赋值执行，会把所有更新请求拦下） */
+        public Long id;
     }
 
     public static class ComponentInput {
@@ -45,6 +48,12 @@ public final class FacilityDtos {
         public String itemCode;
         public String itemName;
         public LocalDate manufactureDate;
+        /** 采集员登记该部件的时间 */
+        public java.time.LocalDateTime createdAt;
+        /** 该部件的保养周期（月），来自巡检项配置，未配置为 null */
+        public Integer maintenanceCycleMonths;
+        /** 该部件的下次保养时间＝生产日期＋保养周期，未配置周期或无生产日期为 null */
+        public LocalDate nextMaintenanceAt;
     }
 
     public static class Summary {
@@ -59,6 +68,7 @@ public final class FacilityDtos {
         public String detailLocation;
         public BigDecimal latitude;
         public BigDecimal longitude;
+        public BigDecimal locationAccuracyMeters;
         public String qrToken;
         public String brand;
         public String model;
@@ -69,6 +79,10 @@ public final class FacilityDtos {
         public Long updateRuleId;
         public LocalDate expectedUpdateDate;
         public java.time.LocalDateTime nextMaintenanceAt;
+        /** 采集员建档登记的部件数量（列表页直接展示，明细经详情接口获取） */
+        public Integer componentCount;
+        /** 采集员拍摄的设施初始照片数量（列表页直接展示，照片清单经照片接口获取） */
+        public Integer photoCount;
         public List<Component> components;
     }
 }

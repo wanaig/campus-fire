@@ -5,7 +5,6 @@ Page({
   data: {
     largeText: false,
     sessionId: '',
-    taskId: '',
     facilityName: '',
     facilityNo: '',
     locationText: '',
@@ -16,6 +15,7 @@ Page({
     completedCount: 0,
     note: '',
     prompts: [],
+    promptText: '',
     photos: [],
     maxPhotos: 6,
     loading: true,
@@ -26,15 +26,20 @@ Page({
     offlineDraft: false,
   },
   onLoad(query) {
+    // 巡检执行页仅保安可用：其他角色直接送回各自首页
+    const user = app.globalData.user
+    if (!user || user.roleCode !== 'GUARD') {
+      wx.reLaunch({ url: user ? app.homePath(user.roleCode) : '/pages/login/login' })
+      return
+    }
     this.setData({
       sessionId: query.sessionId || '',
-      taskId: query.taskId || '',
       facilityName: decodeURIComponent(query.name || '消防设施'),
       facilityNo: decodeURIComponent(query.no || ''),
       locationText: decodeURIComponent(query.location || ''),
       largeText: app.globalData.largeText,
-      facilityType: query.facilityType || 'OTHER',
-      inspectionTitle: query.facilityType === 'FIRE_HYDRANT' ? '室内消火栓巡检记录' : '消防设施巡检记录',
+      facilityType: query.facilityType || 'FIRE_HYDRANT',
+      inspectionTitle: (query.facilityType || 'FIRE_HYDRANT') === 'FIRE_HYDRANT' ? '室内消火栓巡检记录' : '消防设施巡检记录',
       inspectorName: (app.globalData.user && app.globalData.user.displayName) || '',
     })
     this.load()
@@ -48,9 +53,17 @@ Page({
         request(`/inspection/sessions/${this.data.sessionId}/photo-prompts`).catch(() => ({ prompts: [] })),
         request(`/inspection/sessions/${this.data.sessionId}/draft`).catch(() => null),
       ])
+      // 后端返回的部件已是「档案部件 ∪ 类型启用检查项」且全部必检（required_flag），
+      // 接口没有 enabled 字段，这里不能再按 enabled 过滤，否则清单会被清空
+      const promptList = (prompts && prompts.prompts) || []
       const update = {
-        items: (items || []).filter(item => item.enabled),
-        prompts: (prompts && prompts.prompts) || [],
+        items: items || [],
+        prompts: promptList,
+        // WXML 绑定不支持方法调用，提示文案在 JS 里先拼好
+        promptText: promptList.join('、'),
+        // 无历史草稿时也必须是空对象，否则下方按部件统计进度会读到 undefined
+        results: {},
+        note: '',
         loading: false,
       }
       if (draft && draft.results) {
@@ -67,10 +80,25 @@ Page({
   },
   setResult(e) {
     const { code, value } = e.currentTarget.dataset
-    const results = Object.assign({}, this.data.results, { [code]: value })
-    const completedCount = this.data.items.filter(item => results[item.item_code]).length
-    this.setData({ results, completedCount })
-    wx.vibrateShort({ type: value === 'FAIL' ? 'heavy' : 'light' })
+    const item = this.data.items.find(i => i.item_code === code)
+    const name = item ? item.item_name : '该部件'
+    wx.showModal({
+      title: '请再次确认',
+      content: value === 'FAIL'
+        ? `请再次确认「${name}」是否存在异常?确认后将登记为“异常”。`
+        : `请再次确认「${name}」现场是否正常?确认后将登记为“正常”。`,
+      confirmText: '确认',
+      cancelText: '取消',
+      // 确认按钮配色与部件选中态一致：异常红色警示、正常绿色
+      confirmColor: value === 'FAIL' ? '#b42318' : '#246b45',
+      success: (res) => {
+        if (!res.confirm) return
+        const results = Object.assign({}, this.data.results, { [code]: value })
+        const completedCount = this.data.items.filter(i => results[i.item_code]).length
+        this.setData({ results, completedCount })
+        wx.vibrateShort({ type: value === 'FAIL' ? 'heavy' : 'light' })
+      },
+    })
   },
   onNote(e) {
     this.setData({ note: e.detail.value })
@@ -93,11 +121,11 @@ Page({
       })
       if (!choice || !choice.tempFiles || !choice.tempFiles.length) return
       wx.showLoading({ title: '正在上传照片', mask: true })
-      const location = await getLocation().catch(() => null)
-      const coords = location || { latitude: 0, longitude: 0 }
+      const location = await getLocation()
       const uploaded = []
       for (const file of choice.tempFiles) {
-        const result = await uploadPhoto(this.data.sessionId, file.tempFilePath, coords.latitude, coords.longitude)
+        const result = await uploadPhoto(this.data.sessionId, file.tempFilePath,
+          location.latitude, location.longitude, location.accuracy)
         uploaded.push({ path: file.tempFilePath, photoId: result.photoId })
       }
       this.setData({ photos: this.data.photos.concat(uploaded) })
@@ -134,7 +162,6 @@ Page({
   },
   async saveDraft(silent) {
     const data = {
-      taskId: Number(this.data.taskId),
       results: this.data.results,
       note: this.data.note,
     }

@@ -1,6 +1,6 @@
 <view class="tab-bar">
   <view
-    wx:if="{{role === 'GUARD'}}"
+    wx:if="{{role === 'GUARD' || role === 'VISITOR'}}"
     class="tab-item {{current === 'tasks' ? 'active' : ''}}"
     hover-class="tab-hover"
     data-path="/pages/tasks/tasks"
@@ -14,7 +14,7 @@
         <view class="icon-task-line short"></view>
       </view>
     </view>
-    <view class="tab-label">巡检任务</view>
+    <view class="tab-label">{{role === 'VISITOR' ? '巡检状态' : '扫码巡检'}}</view>
   </view>
 
   <view
@@ -31,11 +31,11 @@
     <view class="tab-label">设施采集</view>
   </view>
 
-  <view class="tab-scan" wx:if="{{role !== 'ADMIN'}}" hover-class="none" bindtap="onScan">
+  <view class="tab-scan" wx:if="{{role === 'GUARD' || role === 'VISITOR' || role === 'COLLECTOR'}}" hover-class="none" bindtap="onScan">
     <view class="scan-btn {{scanning ? 'busy' : ''}}">
       <view class="scan-frame"></view>
     </view>
-    <view class="tab-label scan-label">{{role === 'COLLECTOR' ? '扫码采集' : '扫一扫'}}</view>
+    <view class="tab-label scan-label">{{role === 'COLLECTOR' ? '扫码采集' : role === 'VISITOR' ? '扫码查询' : '扫一扫'}}</view>
   </view>
 
   <view

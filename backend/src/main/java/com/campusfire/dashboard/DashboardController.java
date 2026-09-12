@@ -44,12 +44,9 @@ public class DashboardController {
         data.put("facilitySummary", jdbcTemplate.queryForList(
                 "SELECT ft.type_code AS facilityType,ft.type_name AS facilityTypeName,COUNT(f.id) AS totalCount,SUM(CASE WHEN f.lifecycle_status='IN_USE' THEN 1 ELSE 0 END) AS inUseCount,SUM(CASE WHEN f.lifecycle_status<>'IN_USE' THEN 1 ELSE 0 END) AS inactiveCount FROM facility_type ft LEFT JOIN facility f ON f.facility_type_id=ft.id GROUP BY ft.id,ft.type_code,ft.type_name ORDER BY ft.id"));
         data.put("facilityTotal", jdbcTemplate.queryForObject("SELECT COUNT(*) FROM facility", Integer.class));
-        data.put("taskSummary", jdbcTemplate.queryForList(
-                "SELECT status,COUNT(*) AS count FROM inspection_task GROUP BY status ORDER BY status"));
+        data.put("inspectionSummary", inspectionSummary());
         data.put("rectificationSummary", jdbcTemplate.queryForList(
                 "SELECT status,COUNT(*) AS count FROM rectification_order GROUP BY status ORDER BY status"));
-        data.put("overdueTaskCount", jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM inspection_task WHERE status IN ('PENDING','IN_PROGRESS') AND due_date<CURDATE()", Integer.class));
         data.put("maintenanceDueFacilities", jdbcTemplate.queryForList(
                 "SELECT id,facility_no,name,campus,building,floor,area,next_maintenance_at FROM facility WHERE next_maintenance_at IS NOT NULL AND next_maintenance_at<=DATE_ADD(NOW(),INTERVAL 30 DAY) ORDER BY next_maintenance_at LIMIT 100"));
         data.put("inspectionTrend", jdbcTemplate.queryForList(
@@ -58,11 +55,32 @@ public class DashboardController {
         return ApiResponse.success(data);
     }
 
+    /** 在用设施的巡检时效：以设施为主体统计 30 天内是否巡检过，超期（含从未巡检）用于看板提醒 */
+    private Map<String, Object> inspectionSummary() {
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT (SELECT COUNT(*) FROM facility WHERE lifecycle_status='IN_USE') AS total," +
+                        "(SELECT COUNT(DISTINCT r.facility_id) FROM inspection_record r JOIN facility f ON f.id=r.facility_id " +
+                        "LEFT JOIN inspection_record_correction c ON c.record_id=r.id " +
+                        "WHERE c.id IS NULL AND f.lifecycle_status='IN_USE' AND r.submitted_at>=DATE_SUB(CURDATE(),INTERVAL 30 DAY)) AS recent," +
+                        "(SELECT COUNT(DISTINCT r.facility_id) FROM inspection_record r JOIN facility f ON f.id=r.facility_id " +
+                        "LEFT JOIN inspection_record_correction c ON c.record_id=r.id " +
+                        "WHERE c.id IS NULL AND f.lifecycle_status='IN_USE') AS everInspected");
+        int total = ((Number) row.get("total")).intValue();
+        int recent = ((Number) row.get("recent")).intValue();
+        int everInspected = ((Number) row.get("everInspected")).intValue();
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("total", total);
+        summary.put("recent", recent);
+        summary.put("overdue", Math.max(0, total - recent));
+        summary.put("neverInspected", Math.max(0, total - everInspected));
+        return summary;
+    }
+
     /** 近 N 天巡检记录中异常部件分布，与检查项配置联动（如消火栓六部件） */
     private List<Map<String, Object>> componentIssueSummary(int days) {
         List<Map<String, Object>> records = jdbcTemplate.queryForList(
                 "SELECT f.id AS facility_id,r.results_json FROM inspection_record r " +
-                        "JOIN inspection_task t ON t.id=r.task_id JOIN facility f ON f.id=t.facility_id " +
+                        "JOIN facility f ON f.id=r.facility_id " +
                         "WHERE r.submitted_at>=DATE_SUB(CURDATE(),INTERVAL ? DAY)", days);
         if (records.isEmpty()) return Collections.emptyList();
         // 部件名优先按采集员建档登记的档案部件翻译，与巡检记录页保持一致

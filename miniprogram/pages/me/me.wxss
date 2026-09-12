@@ -36,11 +36,6 @@
 .entry-card {
   border-left: 8rpx solid #b42318;
 }
-.server-value {
-  margin: 8rpx 0;
-  word-break: break-all;
-  color: #45545e;
-}
 .logout-btn {
   margin-top: 30rpx;
 }

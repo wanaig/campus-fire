@@ -13,6 +13,9 @@ dist/
 
 # Environment and local data
 .env
+*.env.local
+.zcode/
+input_image*.png
 deploy/data/
 data/
 uploads/

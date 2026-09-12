@@ -3,7 +3,7 @@ const { request } = require('../../utils/api')
 
 Page({
   data: {
-    username: 'guard',
+    username: '',
     password: '',
     submitting: false,
   },
@@ -29,6 +29,7 @@ Page({
         wx.showToast({ title: '当前账号无权使用巡检端', icon: 'none' })
         return
       }
+      app.clearVisitor()
       app.setUser(data.user, data.accessToken)
       wx.reLaunch({ url: app.homePath(data.user.roleCode) })
     } catch (error) {
@@ -36,5 +37,11 @@ Page({
     } finally {
       this.setData({ submitting: false })
     }
+  },
+  // 访客浏览：免登录只读查看各消火栓巡检状态与历史记录
+  enterAsVisitor() {
+    app.clearUser()
+    app.setVisitor()
+    wx.reLaunch({ url: app.homePath('GUARD') })
   },
 })

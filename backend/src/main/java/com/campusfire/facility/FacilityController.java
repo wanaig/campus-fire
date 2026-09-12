@@ -22,5 +22,5 @@ public class FacilityController {
     @PutMapping("/{id}") public ApiResponse<?> update(@PathVariable long id,@Valid @RequestBody FacilityDtos.UpdateRequest r,Authentication a) { r.id=id; AuthenticatedUser u=current(a); return ApiResponse.success(service.update(r,u.getId(),u.getRoleCode())); }
     @PostMapping("/{id}/qr/renew") public ApiResponse<?> renewQr(@PathVariable long id,Authentication a) { AuthenticatedUser u=current(a); return ApiResponse.success(service.renewQr(id,u.getId(),u.getRoleCode())); }
     @PostMapping("/{id}/qr/revoke") public ApiResponse<?> revokeQr(@PathVariable long id,Authentication a) { AuthenticatedUser u=current(a); return ApiResponse.success(service.revokeQr(id,u.getId(),u.getRoleCode())); }
-    @DeleteMapping("/{id}") public ApiResponse<?> delete(@PathVariable long id,Authentication a) { AuthenticatedUser u=current(a); service.delete(id,u.getId(),u.getRoleCode()); return ApiResponse.success(java.util.Collections.singletonMap("deleted",true)); }
+    @DeleteMapping("/{id}") public ApiResponse<?> delete(@PathVariable long id,@RequestParam(required=false,defaultValue="false") boolean force,Authentication a) { AuthenticatedUser u=current(a); service.delete(id,u.getId(),u.getRoleCode(),force); return ApiResponse.success(java.util.Collections.singletonMap("deleted",true)); }
 }

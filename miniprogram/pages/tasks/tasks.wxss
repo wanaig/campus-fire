@@ -17,6 +17,24 @@
   color: #b42318;
   font-weight: 600;
 }
+.summary-chips {
+  margin-bottom: 16rpx;
+}
+.chip-danger {
+  background: #fdece9;
+  color: #b42318;
+}
+.search-bar {
+  margin-bottom: 16rpx;
+}
+.search-input {
+  background: #ffffff;
+  border: 2rpx solid #dfe5e9;
+  border-radius: 12rpx;
+  padding: 16rpx 22rpx;
+  font-size: 28rpx;
+}
+.page-large .search-input { font-size: 34rpx; }
 .page {
   padding-bottom: calc(240rpx + env(safe-area-inset-bottom));
 }
@@ -68,4 +86,81 @@
 .retry-btn {
   margin-top: 24rpx;
   padding: 12rpx 40rpx;
+}
+.record-list {
+  margin-top: 14rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+}
+.record-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-top: 10rpx;
+}
+.record-chip {
+  font-size: 24rpx;
+  line-height: 1;
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  background: #eef6ee;
+  color: #1c7a35;
+  border: 2rpx solid #d3e8d6;
+}
+.page-large .record-chip { font-size: 30rpx; }
+.record-chip.fail {
+  background: #fdecec;
+  color: #b42318;
+  border-color: #f3c4bf;
+}
+.record-photo {
+  margin-top: 8rpx;
+  font-size: 24rpx;
+}
+.photo-link {
+  margin-top: 8rpx;
+  font-size: 26rpx;
+  color: #2b5f8f;
+  text-decoration: underline;
+}
+.page-large .photo-link { font-size: 32rpx; }
+
+.maintenance-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 20rpx 0 0;
+  padding: 20rpx 26rpx;
+  border-radius: 14rpx;
+  background: #fff7e6;
+  color: #ad6800;
+  font-size: 26rpx;
+}
+.maintenance-banner.urgent {
+  background: #fff1f0;
+  color: #d4380d;
+}
+.maintenance-banner-action {
+  font-weight: 600;
+  margin-left: 20rpx;
+}
+
+/* 部件保养按钮：到期高亮可点，未到期置灰 */
+.btn-mini.btn-maintain {
+  background: #b42318;
+  color: #ffffff;
+  border: none;
+}
+.btn-mini.btn-maintain-disabled {
+  background: #eef1f4;
+  color: #a5b0ba;
+  border: 1rpx solid #dde3e9;
+}
+
+.btn-mini.btn-maintain,
+.btn-mini.btn-maintain-disabled {
+  padding-left: 16rpx;
+  padding-right: 16rpx;
+  white-space: nowrap;
 }

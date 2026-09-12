@@ -30,6 +30,7 @@ import javax.validation.constraints.NotNull;
 import javax.validation.constraints.Size;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -151,7 +152,23 @@ public class QrCodeController {
         }
         auditService.record(user.getId(), "QRCODE_BATCH_CREATE", "FACILITY_QR_CODE", "batch",
                 Collections.singletonMap("count", total));
+        attachCreatedIds(created);
         return ApiResponse.success(created);
+    }
+
+    /** 批量创建的行补上数据库 id：前端直接用 id 下载标签 PDF，无需再按状态反查 */
+    private void attachCreatedIds(List<Map<String, Object>> created) {
+        if (created.isEmpty()) return;
+        List<Object> tokens = new ArrayList<>();
+        for (Map<String, Object> row : created) tokens.add(row.get("token"));
+        String in = String.join(",", Collections.nCopies(tokens.size(), "?"));
+        Map<String, Long> idByToken = new HashMap<>();
+        jdbcTemplate.queryForList("SELECT id,token FROM facility_qr_code WHERE token IN (" + in + ")", tokens.toArray())
+                .forEach(r -> idByToken.put(String.valueOf(r.get("token")), ((Number) r.get("id")).longValue()));
+        for (Map<String, Object> row : created) {
+            Long id = idByToken.get(String.valueOf(row.get("token")));
+            if (id != null) row.put("id", id);
+        }
     }
 
     private int[] generateGroup(BatchRequest.Group group, int startSerial, List<Map<String, Object>> created) {
@@ -239,21 +256,34 @@ public class QrCodeController {
     }
 
     @GetMapping
-    public ApiResponse<List<Map<String, Object>>> list(@RequestParam(required = false) String status,
-                                                       @RequestParam(required = false) String keyword,
-                                                       Authentication authentication) {
+    public ApiResponse<Map<String, Object>> list(@RequestParam(required = false) String status,
+                                                 @RequestParam(required = false) String keyword,
+                                                 @RequestParam(defaultValue = "1") int page,
+                                                 @RequestParam(defaultValue = "20") int size,
+                                                 Authentication authentication) {
         requireAdmin(authentication);
+        int pageNum = Math.max(1, page);
+        int pageSize = Math.max(1, Math.min(size, 200));
         String like = keyword == null ? "" : "%" + keyword + "%";
         String statusSql = status == null ? "q.status<>'DELETED'" : "q.status=?";
-        String sql = "SELECT q.id,q.token,q.serial_no,q.school,q.campus,q.building,q.floor,q.location_no,q.location_label,q.status,q.created_at,q.bound_at,q.deleted_at," +
-                "q.facility_id,f.facility_no,f.name AS facility_name " +
-                "FROM facility_qr_code q LEFT JOIN facility f ON f.id=q.facility_id " +
-                "WHERE " + statusSql + " AND (?='' OR q.token LIKE ? OR f.facility_no LIKE ? OR f.name LIKE ? OR q.school LIKE ? OR q.campus LIKE ? OR q.building LIKE ? OR q.floor LIKE ? OR q.location_label LIKE ?) " +
-                "ORDER BY q.serial_no DESC";
+        String where = "WHERE " + statusSql + " AND (?='' OR q.token LIKE ? OR f.facility_no LIKE ? OR f.name LIKE ? OR q.school LIKE ? OR q.campus LIKE ? OR q.building LIKE ? OR q.floor LIKE ? OR q.location_label LIKE ?) ";
         List<Object> args = new ArrayList<>();
         if (status != null) args.add(status);
         for (int i = 0; i < 9; i++) args.add(like);
-        return ApiResponse.success(jdbcTemplate.queryForList(sql, args.toArray()));
+        Integer total = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM facility_qr_code q LEFT JOIN facility f ON f.id=q.facility_id " + where, Integer.class, args.toArray());
+        String sql = "SELECT q.id,q.token,q.serial_no,q.school,q.campus,q.building,q.floor,q.location_no,q.location_label,q.status,q.created_at,q.bound_at,q.deleted_at," +
+                "q.facility_id,f.facility_no,f.name AS facility_name " +
+                "FROM facility_qr_code q LEFT JOIN facility f ON f.id=q.facility_id " + where +
+                "ORDER BY q.serial_no DESC LIMIT ? OFFSET ?";
+        List<Object> listArgs = new ArrayList<>(args);
+        listArgs.add(pageSize);
+        listArgs.add((pageNum - 1) * pageSize);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("items", jdbcTemplate.queryForList(sql, listArgs.toArray()));
+        data.put("total", total == null ? 0 : total);
+        data.put("page", pageNum);
+        data.put("size", pageSize);
+        return ApiResponse.success(data);
     }
 
     @DeleteMapping("/{id}")
@@ -332,7 +362,7 @@ public class QrCodeController {
                 qr.get("id"));
     }
 
-    /** 重置为未绑定：仅解除与设施的绑定，码值保持不变，采集员可重新扫码采集。 */
+    /** 重置为未绑定：同步删除绑定的设施档案及其全部关联数据（巡检记录、照片等），码值保持不变，采集员可重新扫码采集。 */
     @PostMapping("/{id}/unbind")
     @Transactional
     public ApiResponse<Map<String, Object>> unbind(@PathVariable long id, Authentication authentication) {
@@ -341,11 +371,10 @@ public class QrCodeController {
         if ("DELETED".equals(String.valueOf(qr.get("status")))) throw new IllegalArgumentException("请先恢复已删除的二维码再重置");
         if (!(qr.get("facility_id") instanceof Number)) throw new IllegalArgumentException("该二维码未绑定设施，无需重置");
         Long facilityId = ((Number) qr.get("facility_id")).longValue();
-        jdbcTemplate.update("UPDATE facility SET qr_token=? WHERE id=?",
-                "UNBOUND-" + UUID.randomUUID().toString().replace("-", ""), facilityId);
-        jdbcTemplate.update("UPDATE facility_qr_code SET status='UNCLAIMED',facility_id=NULL,bound_at=NULL WHERE id=?", id);
         Map<String, Object> details = qrDetails(qr);
         details.put("unboundFacilityId", facilityId);
+        // 同步删除设施档案及巡检记录等全部关联数据（含照片文件/对象清理）
+        facilityService.delete(facilityId, user.getId(), user.getRoleCode(), true);
         auditService.record(user.getId(), "QRCODE_UNBIND", "FACILITY_QR_CODE", String.valueOf(id), details);
         return ApiResponse.success(jdbcTemplate.queryForMap(
                 "SELECT id,token,status,facility_id,bound_at FROM facility_qr_code WHERE id=?", id));

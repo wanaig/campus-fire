@@ -29,12 +29,12 @@
         <view class="stat-label">设施总数</view>
       </view>
       <view class="card stat-card">
-        <view class="stat-value">{{stats.pending}}</view>
-        <view class="stat-label">待巡检任务</view>
+        <view class="stat-value">{{stats.recent}}</view>
+        <view class="stat-label">30天内已巡检</view>
       </view>
       <view class="card stat-card {{stats.overdue ? 'stat-danger' : ''}}">
         <view class="stat-value">{{stats.overdue}}</view>
-        <view class="stat-label">逾期任务</view>
+        <view class="stat-label">超期未巡检</view>
       </view>
       <view class="card stat-card {{stats.openRect ? 'stat-danger' : ''}}">
         <view class="stat-value">{{stats.openRect}}</view>
@@ -53,9 +53,9 @@
     </view>
 
     <view class="card">
-      <view class="card-title">任务状态分布</view>
-      <view wx:for="{{taskRows}}" wx:key="status" class="dist-row">
-        <view class="badge {{item.status === 'COMPLETED' ? 'ok' : item.status === 'IN_PROGRESS' ? 'info' : 'warn'}}">{{item.label}}</view>
+      <view class="card-title">巡检时效（以设施统计）</view>
+      <view wx:for="{{inspectionRows}}" wx:key="status" class="dist-row">
+        <view class="badge {{item.status === 'NORMAL' ? 'ok' : item.status === 'OVERDUE' ? 'danger' : 'warn'}}">{{item.label}}</view>
         <view class="dist-count">{{item.count}}</view>
       </view>
     </view>
@@ -88,11 +88,21 @@
 
     <view class="card">
       <view class="card-title">30天内保养到期（{{maintenanceDue.length}}）</view>
+      <view class="muted maint-hint">点击设施可查看该设施的巡检记录和现场照片</view>
       <view wx:if="{{!maintenanceDue.length}}" class="muted">近期没有需要保养的设施</view>
-      <view wx:for="{{maintenanceDue}}" wx:key="id" class="maint-item">
-        <view class="maint-name">{{item.name}}</view>
+      <view
+        wx:for="{{maintenanceDue}}"
+        wx:key="id"
+        class="maint-item maint-tap"
+        data-index="{{index}}"
+        hover-class="maint-hover"
+        bindtap="openFacility"
+      >
+        <view class="row">
+          <view class="maint-name">{{item.name}}</view>
+          <view class="badge warn maint-date">保养：{{item.next_maintenance_at}}</view>
+        </view>
         <view class="muted">{{item.facility_no}} · {{item.campus}} / {{item.building}} / {{item.floor}}</view>
-        <view class="badge warn maint-date">保养：{{item.next_maintenance_at}}</view>
       </view>
     </view>
   </block>

@@ -45,6 +45,8 @@ Write-Host "MySQL / Redis 已就绪" -ForegroundColor Green
 
 # ---------- 2. 后端 ----------
 Write-Step "启动后端服务（端口 8080）"
+# 本地联调开启演示账号初始化（生产环境默认关闭，见 application.yml seed-demo）
+$env:SEED_DEMO_ENABLED = 'true'
 $backendDir = Join-Path $Root 'backend'
 $jar = Join-Path $backendDir 'target\campus-fire-backend-0.1.0-SNAPSHOT.jar'
 $srcNewer = $false
@@ -64,6 +66,27 @@ Start-Process -FilePath 'java' -ArgumentList '-jar', $jar -WorkingDirectory $bac
     -WindowStyle Minimized
 if (-not (Wait-Http 'http://localhost:8080/api/health' '后端' 60)) { throw "后端启动超时" }
 Write-Host "后端已就绪：http://localhost:8080/api" -ForegroundColor Green
+
+# 真机通过局域网访问时，Windows 防火墙必须允许 TCP 8080 入站。
+$firewallRuleName = 'Campus Fire Backend (TCP 8080)'
+$firewallRule = Get-NetFirewallRule -DisplayName $firewallRuleName -ErrorAction SilentlyContinue
+if (-not $firewallRule) {
+    Write-Host "未检测到后端局域网防火墙规则，手机可能无法连接。" -ForegroundColor Yellow
+    Write-Host "请以管理员身份运行：powershell -ExecutionPolicy Bypass -File deploy\allow-lan-backend.ps1" -ForegroundColor Yellow
+}
+
+$defaultRoute = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue |
+    Where-Object { $_.NextHop -ne '0.0.0.0' } |
+    Sort-Object RouteMetric, InterfaceMetric |
+    Select-Object -First 1
+$lanIp = if ($defaultRoute) {
+    Get-NetIPAddress -InterfaceIndex $defaultRoute.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object { $_.IPAddress -notlike '169.254.*' } |
+        Select-Object -First 1 -ExpandProperty IPAddress
+}
+if ($lanIp) {
+    Write-Host "局域网接口：http://${lanIp}:8080/api" -ForegroundColor Green
+}
 
 # ---------- 3. 管理后台前端 ----------
 if (-not $SkipFrontend) {
@@ -92,8 +115,8 @@ Write-Host @"
   后端接口      http://localhost:8080/api
 
   管理员账号    admin / 123456
-  保安（演示）  guard / Guard@123
-  采集员（演示） collector / Collect@123
+  保安账号      guard01-guard10 / 123456
+  采集员账号    collector01-collector10 / 123456
 
   微信小程序：用微信开发者工具导入 miniprogram 目录，
   修改 utils/config.js 中的接口地址后即可体验。

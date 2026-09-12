@@ -21,6 +21,12 @@ Page({
       wx.reLaunch({ url: '/pages/login/login' })
       return
     }
+    // 设施采集是采集员职能：其他角色进入时送回各自首页
+    const user = app.globalData.user
+    if (user && user.roleCode !== 'COLLECTOR') {
+      wx.reLaunch({ url: app.homePath(user.roleCode) })
+      return
+    }
     this.setData({ largeText: app.globalData.largeText })
     this.load()
   },

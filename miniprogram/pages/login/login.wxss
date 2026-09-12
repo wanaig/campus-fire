@@ -30,9 +30,7 @@
 .login-card {
   padding: 40rpx 32rpx;
 }
-.login-tip {
-  margin-top: 24rpx;
-  line-height: 1.7;
-  text-align: center;
-}
 .ph { color: #a6b1b8; }
+.visitor-btn {
+  margin-top: 18rpx;
+}

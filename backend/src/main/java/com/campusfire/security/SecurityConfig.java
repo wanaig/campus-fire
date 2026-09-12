@@ -58,7 +58,11 @@ public class SecurityConfig {
                 .authorizeRequests()
                 .antMatchers("/health", "/auth/login").permitAll()
                 .antMatchers(HttpMethod.GET, "/qr-codes/resolve/**").permitAll()
-                .antMatchers(HttpMethod.GET, "/facilities/**", "/rectifications/**", "/inspection/records").permitAll()
+                .antMatchers(HttpMethod.GET, "/facilities/**", "/rectifications/**", "/inspection/records", "/inspection/status").permitAll()
+                // 巡检留痕照片只读公开：访客扫码查询时可直接查看现场照片（写接口仍需保安登录态）
+                .antMatchers(HttpMethod.GET, "/inspection/records/*/photos", "/inspection/photos/*/file").permitAll()
+                // 设施初始照片（采集员建档留痕）同样只读公开：访客查询设施时可查看档案照片
+                .antMatchers(HttpMethod.GET, "/facility-photos/*/file").permitAll()
                 .anyRequest().authenticated()
                 .and()
                 .exceptionHandling()

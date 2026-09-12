@@ -82,12 +82,11 @@ public class FacilityTypeController {
         Map<String, Object> type = find(id);
         int facilityCount = count("SELECT COUNT(*) FROM facility WHERE facility_type_id=?", id);
         int itemCount = count("SELECT COUNT(*) FROM inspection_item WHERE facility_type_id=?", id);
-        int planCount = count("SELECT COUNT(*) FROM inspection_plan WHERE facility_type_id=? AND deleted=0", id);
         int ruleCount = count("SELECT COUNT(*) FROM facility_update_rule WHERE facility_type_id=?", id);
-        if (facilityCount + itemCount + planCount + ruleCount > 0) {
+        if (facilityCount + itemCount + ruleCount > 0) {
             throw new IllegalArgumentException(String.format(
-                    "该类型仍关联设施 %d 个、检查项 %d 个、巡检计划 %d 个、更新规则 %d 个，请先处理关联数据",
-                    facilityCount, itemCount, planCount, ruleCount));
+                    "该类型仍关联设施 %d 个、检查项 %d 个、更新规则 %d 个，请先处理关联数据",
+                    facilityCount, itemCount, ruleCount));
         }
         jdbcTemplate.update("DELETE FROM facility_type WHERE id=?", id);
         auditService.record(user.getId(), "FACILITY_TYPE_DELETE", "FACILITY_TYPE", String.valueOf(id), type);

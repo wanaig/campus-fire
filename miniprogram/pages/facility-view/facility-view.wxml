@@ -1,0 +1,52 @@
+<view class="page {{largeText ? 'page-large' : ''}}">
+  <view class="page-head">
+    <view class="hello">设施巡检查询</view>
+    <view class="muted">{{visitor ? '访客模式 · 只读查看该设施的巡检状态、历史记录和现场照片' : '只读查看该设施的巡检状态、历史记录和现场照片'}}</view>
+  </view>
+
+  <view wx:if="{{facility}}" class="card">
+    <view class="row">
+      <view class="card-title facility-name">{{facility.name}}</view>
+      <view class="badge {{stateBadge}}">{{stateLabel}}</view>
+    </view>
+    <view class="muted">编号：{{facility.facilityNo}}</view>
+    <view class="muted">位置：{{locationText || '—'}}</view>
+    <view class="row due-row">
+      <view class="muted {{state === 'OVERDUE' ? 'overdue' : ''}}">
+        {{lastInspectedText ? '最近巡检：' + lastInspectedText : '从未巡检过'}}
+      </view>
+      <view wx:if="{{lifecycleLabel}}" class="badge {{lifecycleBadge}}">{{lifecycleLabel}}</view>
+    </view>
+    <view wx:if="{{facility.id}}" class="photo-link" catchtap="viewFacilityPhotos">
+      查看建档初始照片{{facilityPhotoCount ? ' ' + facilityPhotoCount + ' 张' : ''}}
+    </view>
+  </view>
+
+  <view wx:if="{{loading}}" class="empty">正在加载巡检记录…</view>
+  <view wx:elif="{{error}}" class="empty">
+    <view class="empty-icon">!</view>
+    <view>{{error}}</view>
+    <button class="btn-ghost retry-btn" bindtap="load">重新加载</button>
+  </view>
+  <view wx:elif="{{!records.length}}" class="empty">
+    <view class="empty-icon">✓</view>
+    <view>该设施还没有巡检记录</view>
+  </view>
+
+  <view wx:for="{{records}}" wx:for-item="rec" wx:key="id" class="card record-item">
+    <view class="row rect-item-head">
+      <view class="badge {{rec.voidReason ? '' : rec.abnormalCount ? 'warn' : 'ok'}}">{{rec.voidReason ? '已作废' : rec.abnormalCount ? '异常 ' + rec.abnormalCount + ' 项' : '全部正常'}}</view>
+      <view class="muted">{{rec.timeText}} · {{rec.inspector}}</view>
+    </view>
+    <view wx:if="{{rec.chips.length}}" class="record-chips">
+      <view wx:for="{{rec.chips}}" wx:for-item="chip" wx:key="code" class="record-chip {{chip.status === 'FAIL' ? 'fail' : ''}}">{{chip.status === 'FAIL' ? '✗' : '✓'}} {{chip.name}}</view>
+    </view>
+    <view wx:if="{{rec.note}}" class="rect-note">{{rec.note}}</view>
+    <view
+      wx:if="{{rec.photoCount}}"
+      class="photo-link record-photo"
+      data-index="{{index}}"
+      catchtap="viewRecordPhotos"
+    >查看现场照片 {{rec.photoCount}} 张</view>
+  </view>
+</view>

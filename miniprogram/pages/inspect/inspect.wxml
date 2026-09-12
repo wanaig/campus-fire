@@ -52,7 +52,7 @@
 
     <view class="card">
       <view class="card-title">现场照片（至少1张，最多{{maxPhotos}}张）</view>
-      <view class="muted photo-hint">只能现场调用摄像头拍摄，禁止从相册选择{{prompts.length ? '。建议拍摄：' + prompts.join('、') : ''}}</view>
+      <view class="muted photo-hint">只能现场调用摄像头拍摄，禁止从相册选择{{promptText ? '。建议拍摄：' + promptText : ''}}</view>
       <view class="photo-grid">
         <view wx:for="{{photos}}" wx:key="photoId" class="photo-cell">
           <image src="{{item.path}}" mode="aspectFill" class="photo-img" />

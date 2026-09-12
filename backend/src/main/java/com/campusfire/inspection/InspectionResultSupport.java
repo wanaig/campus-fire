@@ -16,8 +16,9 @@ import java.util.Map;
 /**
  * 巡检结果 results_json（{item_code: PASS/FAIL}）与部件名称之间的公共转换逻辑，
  * 供巡检会话、巡检记录查询、报表导出、数据看板共用。
- * 部件清单与名称统一优先取采集员建档登记的档案部件（facility_component），
- * 档案未登记部件的存量设施回退该类型启用检查项（inspection_item），与检查项配置联动。
+ * 保安巡检清单只认「采集员建档勾选登记的档案部件（facility_component）」，
+ * 类型检查项（inspection_item）仅作为同类部件的检查标准文案来源，不再擅自扩充清单；
+ * 历史记录翻译仍并入类型检查项，避免旧记录里的编码翻不出名称。
  */
 @Component
 public class InspectionResultSupport {
@@ -42,14 +43,7 @@ public class InspectionResultSupport {
         }
     }
 
-    /** 按巡检任务取该设施应逐项确认的部件清单（登记顺序） */
-    public LinkedHashMap<String, CheckItem> loadCheckItems(Long taskId) {
-        List<Long> facilityIds = jdbcTemplate.queryForList("SELECT facility_id FROM inspection_task WHERE id=?", Long.class, taskId);
-        if (facilityIds.isEmpty() || facilityIds.get(0) == null) throw new IllegalArgumentException("巡检任务不存在");
-        return loadFacilityCheckItems(facilityIds.get(0));
-    }
-
-    /** 设施应逐项确认的部件清单：档案部件优先，无档案部件的存量设施回退类型检查项 */
+    /** 设施应逐项确认的部件清单：只认采集员建档勾选的档案部件；同编码的类型检查项仅补充检查标准文案 */
     public LinkedHashMap<String, CheckItem> loadFacilityCheckItems(Long facilityId) {
         LinkedHashMap<String, CheckItem> items = new LinkedHashMap<>();
         List<Map<String, Object>> components = jdbcTemplate.queryForList(
@@ -58,20 +52,23 @@ public class InspectionResultSupport {
             String code = String.valueOf(row.get("item_code"));
             items.put(code, new CheckItem(code, String.valueOf(row.get("item_name")), ""));
         }
-        if (!items.isEmpty()) return items;
-        List<Map<String, Object>> legacy = jdbcTemplate.queryForList(
-                "SELECT i.item_code,i.item_name,i.inspection_standard FROM facility f " +
+        // 只补文案不补部件：采集员未勾选的部件（如该设施实际没有的按钮/阀门）不得进入保安巡检清单
+        List<Map<String, Object>> configured = jdbcTemplate.queryForList(
+                "SELECT i.item_code,i.inspection_standard FROM facility f " +
                         "JOIN inspection_item i ON i.facility_type_id=f.facility_type_id " +
-                        "WHERE f.id=? AND i.enabled=1 ORDER BY i.sort_order,i.id", facilityId);
-        for (Map<String, Object> row : legacy) {
+                        "WHERE f.id=? AND i.enabled=1", facilityId);
+        for (Map<String, Object> row : configured) {
             String code = String.valueOf(row.get("item_code"));
-            items.put(code, new CheckItem(code, String.valueOf(row.get("item_name")),
-                    row.get("inspection_standard") == null ? "" : String.valueOf(row.get("inspection_standard"))));
+            CheckItem existing = items.get(code);
+            String standard = row.get("inspection_standard") == null ? "" : String.valueOf(row.get("inspection_standard"));
+            if (existing != null && existing.standard.isEmpty() && !standard.isEmpty()) {
+                items.put(code, new CheckItem(existing.itemCode, existing.itemName, standard));
+            }
         }
         return items;
     }
 
-    /** facility_id -> (部件 code -> 名称)：优先档案部件名，翻译巡检记录时与建档登记保持一致 */
+    /** facility_id -> (部件 code -> 名称)：档案部件名优先，并入类型启用检查项，翻译巡检记录时与巡检清单保持一致 */
     public Map<Long, LinkedHashMap<String, String>> loadFacilityLabels(Collection<Long> facilityIds) {
         Map<Long, LinkedHashMap<String, String>> labels = new HashMap<>();
         if (facilityIds == null || facilityIds.isEmpty()) return labels;
@@ -79,15 +76,11 @@ public class InspectionResultSupport {
         jdbcTemplate.queryForList(placeholdersIn("SELECT facility_id,item_code,item_name FROM facility_component WHERE facility_id IN", ids), ids.toArray())
                 .forEach(row -> labels.computeIfAbsent(((Number) row.get("facility_id")).longValue(), key -> new LinkedHashMap<>())
                         .put(String.valueOf(row.get("item_code")), String.valueOf(row.get("item_name"))));
-        List<Long> fallbackIds = new ArrayList<>();
-        for (Long id : ids) if (!labels.containsKey(id)) fallbackIds.add(id);
-        if (!fallbackIds.isEmpty()) {
-            jdbcTemplate.queryForList(placeholdersIn("SELECT f.id AS facility_id,i.item_code,i.item_name FROM facility f " +
-                    "JOIN inspection_item i ON i.facility_type_id=f.facility_type_id WHERE f.id IN", fallbackIds) +
-                    " AND i.enabled=1 ORDER BY f.id,i.sort_order,i.id", fallbackIds.toArray())
-                    .forEach(row -> labels.computeIfAbsent(((Number) row.get("facility_id")).longValue(), key -> new LinkedHashMap<>())
-                            .put(String.valueOf(row.get("item_code")), String.valueOf(row.get("item_name"))));
-        }
+        jdbcTemplate.queryForList(placeholdersIn("SELECT f.id AS facility_id,i.item_code,i.item_name FROM facility f " +
+                "JOIN inspection_item i ON i.facility_type_id=f.facility_type_id WHERE f.id IN", ids) +
+                " AND i.enabled=1 ORDER BY f.id,i.sort_order,i.id", ids.toArray())
+                .forEach(row -> labels.computeIfAbsent(((Number) row.get("facility_id")).longValue(), key -> new LinkedHashMap<>())
+                        .putIfAbsent(String.valueOf(row.get("item_code")), String.valueOf(row.get("item_name"))));
         return labels;
     }
 

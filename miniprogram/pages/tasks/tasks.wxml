@@ -1,9 +1,23 @@
 <view class="page {{largeText ? 'page-large' : ''}}">
   <view class="page-head">
     <view>
-      <view class="hello">{{items.length ? '今日待办巡检' : '巡检任务'}}</view>
-      <view class="muted">{{today}} · 共 {{items.length}} 项</view>
+      <view class="hello">{{visitor ? '巡检状态' : '扫码巡检'}}</view>
+      <view class="muted">{{visitor ? '访客模式 · 只读浏览巡检状态和记录，也可点底部「扫码查询」查看单个设施' : '随时扫码即可巡检，无需提前派单 · 超过 ' + overdueDays + ' 天未巡检会提醒'}}</view>
     </view>
+  </view>
+  <view wx:if="{{maintenanceDue}}" class="maintenance-banner {{maintenanceOverdue ? 'urgent' : ''}}" bindtap="goMaintenance">
+    <view class="maintenance-banner-text">
+      {{maintenanceOverdue ? maintenanceOverdue + ' 个部件保养已超期' : ''}}{{maintenanceDue ? (maintenanceOverdue ? '，' : '') + '共 ' + maintenanceDue + ' 个部件需要保养' : ''}}
+    </view>
+    <view class="maintenance-banner-action">去处理 ›</view>
+  </view>
+  <view wx:if="{{summary}}" class="chips summary-chips">
+    <view class="chip">在用设施 {{summary.total}}</view>
+    <view class="chip">{{overdueDays}}天内已巡检 {{summary.recent}}</view>
+    <view class="chip {{summary.overdue ? 'chip-danger' : ''}}">超期未巡检 {{summary.overdue}}</view>
+  </view>
+  <view class="search-bar">
+    <input class="search-input" placeholder="搜索设施名称 / 编号 / 位置" value="{{keyword}}" bindinput="onKeyword" confirm-type="search" />
   </view>
   <view class="chips">
     <view
@@ -15,36 +29,65 @@
     >{{item.label}}</view>
   </view>
 
-  <view wx:if="{{loading}}" class="empty">正在加载任务…</view>
+  <view wx:if="{{loading}}" class="empty">正在加载设施…</view>
   <view wx:elif="{{error}}" class="empty">
     <view class="empty-icon">!</view>
     <view>{{error}}</view>
     <button class="btn-ghost retry-btn" bindtap="load">重新加载</button>
   </view>
-  <view wx:elif="{{!items.length}}" class="empty">
+  <view wx:elif="{{!visible.length}}" class="empty">
     <view class="empty-icon">✓</view>
-    <view>当前没有巡检任务</view>
+    <view>{{keyword || active ? '没有符合条件的设施' : '还没有设施档案'}}</view>
   </view>
 
-  <view wx:for="{{items}}" wx:key="id" class="card task-card">
+  <view wx:for="{{visible}}" wx:key="id" class="card task-card">
     <view class="row">
       <view class="card-title task-name">{{item.name}}</view>
-      <view class="badge {{item.status === 'COMPLETED' ? 'ok' : item.status === 'IN_PROGRESS' ? 'info' : 'warn'}}">
-        {{item.status === 'PENDING' ? '待巡检' : item.status === 'IN_PROGRESS' ? '巡检中' : '已完成'}}
+      <view class="badge {{item.inspectionState === 'NORMAL' ? 'ok' : item.inspectionState === 'OVERDUE' ? 'danger' : 'warn'}}">
+        {{item.inspectionState === 'NORMAL' ? '巡检正常' : item.inspectionState === 'OVERDUE' ? '已超期' : '从未巡检'}}
       </view>
     </view>
-    <view class="muted">编号：{{item.facility_no}}</view>
+    <view class="muted">编号：{{item.facilityNo}}</view>
     <view class="muted">位置：{{item.campus}} / {{item.building}} / {{item.floor}} / {{item.area}}</view>
     <view class="row due-row">
-      <view class="muted {{item.status !== 'COMPLETED' && item.due_date < today ? 'overdue' : ''}}">
-        截止：{{item.due_date}}{{item.status !== 'COMPLETED' && item.due_date < today ? '（已逾期）' : ''}}
+      <view class="muted {{item.inspectionState === 'OVERDUE' ? 'overdue' : ''}}">
+        {{item.lastInspectedText ? '最近巡检：' + item.lastInspectedText : '从未巡检过'}}{{item.inspectionState === 'OVERDUE' ? '（超期 ' + item.overdueBy + ' 天）' : ''}}
       </view>
       <button
-        wx:if="{{item.status !== 'COMPLETED'}}"
-        class="btn-mini"
+        wx:if="{{!visitor && item.maintenanceComponentCount}}"
+        class="btn-mini {{item.dueComponentCount ? 'btn-maintain' : 'btn-maintain-disabled'}}"
         data-index="{{index}}"
-        bindtap="startInspection"
-      >{{item.status === 'IN_PROGRESS' ? '继续巡检' : '扫码巡检'}}</button>
+        bindtap="goMaintenance"
+        disabled="{{!item.dueComponentCount}}"
+      >保养 {{item.maintenanceCountdownText}}</button>
+    </view>
+    <view class="rect-block">
+      <view class="rect-toggle" data-index="{{index}}" catchtap="toggleRecords">
+        <view class="badge {{item.recordsLoaded && item.records.length ? 'info' : ''}}">
+          巡检记录{{item.recordsLoaded ? ' ' + item.records.length + ' 条' : ''}}
+        </view>
+        <view class="rect-toggle-hint">{{item.recordsLoading ? '读取中…' : item.recordsExpanded ? '收起' : '查看记录'}}</view>
+      </view>
+      <view wx:if="{{item.recordsExpanded && item.recordsLoaded}}" class="record-list">
+        <view wx:if="{{!item.records.length}}" class="muted">还没有巡检记录，巡检提交后在这里留痕</view>
+        <view wx:for="{{item.records}}" wx:for-item="rec" wx:for-index="rindex" wx:key="id" class="rect-item record-item">
+          <view class="row rect-item-head">
+            <view class="badge {{rec.voidReason ? '' : rec.abnormalCount ? 'warn' : 'ok'}}">{{rec.voidReason ? '已作废' : rec.abnormalCount ? '异常 ' + rec.abnormalCount + ' 项' : '全部正常'}}</view>
+            <view class="muted">{{rec.timeText}} · {{rec.inspector}}</view>
+          </view>
+          <view wx:if="{{rec.chips.length}}" class="record-chips">
+            <view wx:for="{{rec.chips}}" wx:for-item="chip" wx:key="code" class="record-chip {{chip.status === 'FAIL' ? 'fail' : ''}}">{{chip.status === 'FAIL' ? '✗' : '✓'}} {{chip.name}}</view>
+          </view>
+          <view wx:if="{{rec.note}}" class="rect-note">{{rec.note}}</view>
+          <view
+            wx:if="{{rec.photoCount}}"
+            class="photo-link record-photo"
+            data-index="{{index}}"
+            data-rindex="{{rindex}}"
+            catchtap="viewRecordPhotos"
+          >查看现场照片 {{rec.photoCount}} 张</view>
+        </view>
+      </view>
     </view>
     <view wx:if="{{item.rectCount}}" class="rect-block">
       <view class="rect-toggle" data-index="{{index}}" catchtap="toggleRect">

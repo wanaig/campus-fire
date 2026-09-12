@@ -32,6 +32,7 @@
     <view class="muted">类型：{{item.typeName}}</view>
     <view class="muted">位置：{{item.locationText}}</view>
     <view wx:if="{{item.brand || item.model}}" class="muted">品牌：{{item.brand || '—'}} / {{item.model || '—'}}</view>
+    <view class="muted">初始照片：{{item.photoCount ? item.photoCount + ' 张' : '未拍摄'}}</view>
     <view class="row due-row">
       <view class="muted">下次保养：{{item.maintenanceText || '未排期'}}</view>
       <button class="btn-mini" catchtap="onEditCard" data-index="{{index}}">修改档案</button>

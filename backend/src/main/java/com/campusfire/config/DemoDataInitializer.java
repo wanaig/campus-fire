@@ -41,9 +41,12 @@ public class DemoDataInitializer implements CommandLineRunner {
     @Override
     public void run(String... args) {
         if (!enabled) return;
-        ensureUser("guard", "保安张三", "GUARD", guardPassword);
-        ensureUser("collector", "采集员李四", "COLLECTOR", collectorPassword);
-        log.warn("演示账号已初始化：保安 guard / 采集员 collector。正式部署请设置 SEED_DEMO_ENABLED=false。");
+        for (int index = 1; index <= 10; index++) {
+            String suffix = String.format("%02d", index);
+            ensureUser("guard" + suffix, "保安" + suffix, "GUARD", guardPassword);
+            ensureUser("collector" + suffix, "采集员" + suffix, "COLLECTOR", collectorPassword);
+        }
+        log.warn("演示账号已初始化：保安 guard01-guard10 / 采集员 collector01-collector10。正式部署请设置 SEED_DEMO_ENABLED=false。");
     }
 
     private Long ensureUser(String username, String displayName, String roleCode, String password) {

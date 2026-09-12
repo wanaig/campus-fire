@@ -5,6 +5,8 @@
     "pages/inspect/inspect",
     "pages/collect/collect",
     "pages/collect-form/collect-form",
+    "pages/facility-view/facility-view",
+    "pages/maintenance/maintenance",
     "pages/dashboard/dashboard",
     "pages/me/me"
   ],
@@ -22,7 +24,7 @@
     "backgroundColor": "#ffffff",
     "borderStyle": "black",
     "list": [
-      { "pagePath": "pages/tasks/tasks", "text": "巡检任务" },
+      { "pagePath": "pages/tasks/tasks", "text": "扫码巡检" },
       { "pagePath": "pages/collect/collect", "text": "设施采集" },
       { "pagePath": "pages/dashboard/dashboard", "text": "数据看板" },
       { "pagePath": "pages/me/me", "text": "我的" }

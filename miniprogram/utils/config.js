@@ -1,8 +1,6 @@
-// 后端接口地址：
-// - 微信开发者工具模拟器可直接使用 http://127.0.0.1:8080/api
-// - 真机调试使用电脑的局域网地址（当前 WLAN IP），手机与电脑需连同一 Wi-Fi
-// - 手机连不上时先确认：1) 电脑 WLAN IP 是否变化 2) Windows 防火墙已放行 8080
-// - 说明：默认用 IP 而不是 localhost，可避免部分代理软件（Clash TUN 模式）劫持 localhost
-const BASE_URL = 'http://10.107.148.6:8080/api'
+// 后端接口地址（上线前必改）：
+// 1. 正式发布：填已备案的 https 域名，并在微信公众平台「开发设置-服务器域名」配置 request/uploadFile 合法域名
+// 2. 体验版/开发调试：可临时填局域网地址（手机与电脑同一网络，且后端防火墙已放行对应端口）
+const BASE_URL = 'https://mini.wanai.uno/api'
 
 module.exports = { BASE_URL }

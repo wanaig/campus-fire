@@ -1,0 +1,84 @@
+<view class="page {{largeText ? 'page-large' : ''}}">
+  <view class="page-head">
+    <view class="hello">{{facility ? '设施部件保养' : '保养提醒'}}</view>
+    <view class="sub" wx:if="{{!facility}}">到期前7天内可执行保养，超期部件请尽快处理</view>
+    <view class="sub" wx:else>{{facility.name}}（{{facility.facilityNo}}）{{facility.location ? ' · ' + facility.location : ''}}</view>
+  </view>
+
+  <view class="head-actions">
+    <view class="scan-btn" bindtap="scanToMaintain">扫码保养</view>
+    <view class="back-link" wx:if="{{facility}}" bindtap="backToDue">返回提醒列表</view>
+  </view>
+
+  <view class="tip-banner" wx:if="{{!facility && components.length}}">
+    <text>共 {{components.length}} 个部件需要保养{{overdueCount ? '（' + overdueCount + ' 个已超期）' : ''}}</text>
+  </view>
+
+  <block wx:if="{{loading}}">
+    <view class="empty">正在读取部件保养状态…</view>
+  </block>
+  <block wx:elif="{{error}}">
+    <view class="empty">{{error}}</view>
+  </block>
+  <block wx:elif="{{!components.length}}">
+    <view class="empty">{{facility ? '该设施未登记部件，请联系采集员补全档案' : '暂无需要保养的部件'}}</view>
+  </block>
+  <block wx:else>
+    <view
+      wx:for="{{components}}"
+      wx:key="index"
+      class="component-card {{item.dueStatus === 'OVERDUE' ? 'overdue' : item.dueStatus === 'DUE_SOON' ? 'due-soon' : ''}}"
+      bindtap="openForm"
+      data-id="{{item.component_id}}"
+    >
+      <view class="component-main">
+        <view class="component-name">{{item.item_name}}</view>
+        <view class="component-facility">{{item.name}}（{{item.facility_no}}）</view>
+        <view class="component-location">{{item.locationText}}</view>
+      </view>
+      <view class="component-side">
+        <block wx:if="{{item.dueStatus === 'OVERDUE'}}">
+          <view class="due-badge overdue">已超期 {{item.overdueDays}} 天</view>
+        </block>
+        <block wx:elif="{{item.dueStatus === 'DUE_SOON'}}">
+          <view class="due-badge due-soon">即将到期</view>
+        </block>
+        <block wx:elif="{{item.dueStatus === 'NONE'}}">
+          <view class="due-badge none">未设周期</view>
+        </block>
+        <block wx:else>
+          <view class="due-badge normal">未到期</view>
+        </block>
+        <view class="due-date" wx:if="{{item.next_due_at}}">到期日：{{item.next_due_at}}</view>
+        <view class="due-date" wx:if="{{item.last_maintained_at}}">上次保养：{{item.last_maintained_at}}</view>
+      </view>
+    </view>
+  </block>
+
+  <view wx:if="{{form}}" class="form-mask" bindtap="closeForm">
+    <view class="form-sheet" catchtap="stop">
+      <view class="form-title">{{form.maintenanceType === 'MAINTAIN' ? '部件保养' : '部件更换'}}</view>
+      <view class="form-target">{{form.component.item_name}} · {{form.component.name}}（{{form.component.facility_no}}）</view>
+
+      <view class="type-switch">
+        <view class="type-option {{form.maintenanceType === 'MAINTAIN' ? 'active' : ''}}" bindtap="onTypeChange" data-type="MAINTAIN">保养</view>
+        <view class="type-option {{form.maintenanceType === 'REPLACE' ? 'active' : ''}}" bindtap="onTypeChange" data-type="REPLACE">更换</view>
+      </view>
+
+      <view class="field-label">说明</view>
+      <textarea class="form-textarea" value="{{form.resultNote}}" bindinput="onNoteInput" placeholder="例如：已完成清洁和压力测试" maxlength="200" />
+
+      <block wx:if="{{form.maintenanceType === 'REPLACE'}}">
+        <view class="field-label">新部件生产日期</view>
+        <picker mode="date" value="{{form.newManufactureDate}}" bindchange="onDateInput">
+          <view class="date-picker">{{form.newManufactureDate || '选择生产日期（用于重算保养周期）'}}</view>
+        </picker>
+      </block>
+
+      <view class="form-actions">
+        <view class="form-btn secondary" bindtap="closeForm">取消</view>
+        <view class="form-btn primary {{submitting ? 'disabled' : ''}}" bindtap="submit">{{submitting ? '提交中…' : '确认提交'}}</view>
+      </view>
+    </view>
+  </view>
+</view>

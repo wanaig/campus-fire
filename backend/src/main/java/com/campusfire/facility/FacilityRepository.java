@@ -20,9 +20,11 @@ public class FacilityRepository {
     public FacilityRepository(JdbcTemplate jdbcTemplate) { this.jdbcTemplate = jdbcTemplate; }
 
     private final String select = "SELECT f.id, f.facility_no, t.type_code, f.name, f.campus, f.building, " +
-            "f.floor, f.area, f.detail_location, f.latitude, f.longitude, f.qr_token, f.brand, f.model, " +
+            "f.floor, f.area, f.detail_location, f.latitude, f.longitude, f.location_accuracy_meters, f.qr_token, f.brand, f.model, " +
             "f.specification, f.manufacture_date, f.commissioned_date, f.lifecycle_status, f.update_rule_id, " +
-            "f.next_maintenance_at, DATE_ADD(COALESCE(f.commissioned_date,f.manufacture_date), INTERVAL r.service_life_years YEAR) AS expected_update_date " +
+            "f.next_maintenance_at, DATE_ADD(COALESCE(f.commissioned_date,f.manufacture_date), INTERVAL r.service_life_years YEAR) AS expected_update_date, " +
+            "(SELECT COUNT(*) FROM facility_component fc WHERE fc.facility_id=f.id) AS component_count, " +
+            "(SELECT COUNT(*) FROM facility_photo fp WHERE fp.facility_id=f.id) AS photo_count " +
             "FROM facility f JOIN facility_type t ON t.id=f.facility_type_id LEFT JOIN facility_update_rule r ON r.id=f.update_rule_id ";
 
     public long insert(FacilityDtos.CreateRequest r, long creatorId, String qrToken) {
@@ -33,11 +35,11 @@ public class FacilityRepository {
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement("INSERT INTO facility " +
                     "(facility_no, facility_type_id, name, campus, building, floor, area, detail_location, " +
-                    "latitude, longitude, qr_token, brand, model, specification, manufacture_date, commissioned_date, lifecycle_status, created_by) " +
-                    "SELECT ?, id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM facility_type WHERE type_code=?",
+                    "latitude, longitude, location_accuracy_meters, qr_token, brand, model, specification, manufacture_date, commissioned_date, lifecycle_status, created_by) " +
+                    "SELECT ?, id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM facility_type WHERE type_code=?",
                     Statement.RETURN_GENERATED_KEYS);
             int i=1; ps.setString(i++,facilityNo); ps.setString(i++,r.name); ps.setString(i++,r.campus); ps.setString(i++,r.building);
-            ps.setString(i++,r.floor); ps.setString(i++,r.area); ps.setString(i++,r.detailLocation); ps.setBigDecimal(i++,r.latitude); ps.setBigDecimal(i++,r.longitude);
+            ps.setString(i++,r.floor); ps.setString(i++,r.area); ps.setString(i++,r.detailLocation); ps.setBigDecimal(i++,r.latitude); ps.setBigDecimal(i++,r.longitude); ps.setBigDecimal(i++,r.locationAccuracyMeters);
             ps.setString(i++,qrToken != null ? qrToken : UUID.randomUUID().toString().replace("-", "")); ps.setString(i++,r.brand); ps.setString(i++,r.model); ps.setString(i++,r.specification);
             ps.setObject(i++,r.manufactureDate); ps.setObject(i++,r.commissionedDate); ps.setString(i++,r.lifecycleStatus); ps.setLong(i++,creatorId); ps.setString(i,r.facilityType); return ps;
         }, holder);
@@ -58,20 +60,47 @@ public class FacilityRepository {
     }
 
     public int revokeQrBinding(long facilityId) {
-        return jdbcTemplate.update("UPDATE facility_qr_code SET status='REVOKED' WHERE facility_id=? AND status='BOUND'", facilityId);
+        return jdbcTemplate.update("UPDATE facility_qr_code SET status='UNCLAIMED',facility_id=NULL,bound_at=NULL WHERE facility_id=?", facilityId);
     }
 
     public int detachQrBinding(long facilityId) {
-        return jdbcTemplate.update("UPDATE facility_qr_code SET status='REVOKED',facility_id=NULL,bound_at=NULL WHERE facility_id=?", facilityId);
+        return jdbcTemplate.update("UPDATE facility_qr_code SET status='UNCLAIMED',facility_id=NULL,bound_at=NULL WHERE facility_id=?", facilityId);
     }
 
     public void applyDefaultRule(long facilityId) {
         jdbcTemplate.update("UPDATE facility f JOIN facility_update_rule r ON r.facility_type_id=f.facility_type_id AND r.enabled=1 SET f.update_rule_id=r.id, f.next_maintenance_at=CASE WHEN r.maintenance_cycle_months IS NOT NULL AND COALESCE(f.commissioned_date,f.manufacture_date) IS NOT NULL THEN DATE_ADD(COALESCE(f.commissioned_date,f.manufacture_date), INTERVAL r.maintenance_cycle_months MONTH) ELSE f.next_maintenance_at END WHERE f.id=? AND f.update_rule_id IS NULL", facilityId);
     }
 
+    /** 按生产年份选择部件的有效保养周期；分界年份当年归入“及以后”。 */
+    private static final String componentCycleMonths =
+            "CASE WHEN ii.maintenance_year_threshold IS NOT NULL " +
+            "THEN CASE WHEN YEAR(fc.manufacture_date)<ii.maintenance_year_threshold " +
+            "THEN ii.maintenance_cycle_before_months ELSE ii.maintenance_cycle_after_months END " +
+            "ELSE ii.maintenance_cycle_months END";
+
+    /** 重算下次保养：优先取「部件生产日期＋该部件适用周期」中最早到期者，无则回退设施级保养规则，再无则保持原值 */
+    private static final String refreshNextMaintenance =
+            "UPDATE facility f LEFT JOIN facility_update_rule r ON r.id=f.update_rule_id " +
+            "SET f.next_maintenance_at=COALESCE(" +
+            "(SELECT MIN(TIMESTAMPADD(MONTH," + componentCycleMonths + ",fc.manufacture_date)) " +
+            "FROM facility_component fc JOIN inspection_item ii ON ii.facility_type_id=f.facility_type_id AND ii.item_code=fc.item_code " +
+            "WHERE fc.facility_id=f.id AND fc.manufacture_date IS NOT NULL AND (" + componentCycleMonths + ") IS NOT NULL), " +
+            "CASE WHEN r.maintenance_cycle_months IS NOT NULL AND COALESCE(f.commissioned_date,f.manufacture_date) IS NOT NULL " +
+            "THEN DATE_ADD(COALESCE(f.commissioned_date,f.manufacture_date), INTERVAL r.maintenance_cycle_months MONTH) END, " +
+            "f.next_maintenance_at) ";
+
+    public void refreshNextMaintenanceFromComponents(long facilityId) {
+        jdbcTemplate.update(refreshNextMaintenance + "WHERE f.id=?", facilityId);
+    }
+
+    /** 部件保养周期配置变更后，对该类型的全部设施批量重算 */
+    public void refreshNextMaintenanceByType(long facilityTypeId) {
+        jdbcTemplate.update(refreshNextMaintenance + "WHERE f.facility_type_id=?", facilityTypeId);
+    }
+
     public int update(FacilityDtos.UpdateRequest r) {
-        return jdbcTemplate.update("UPDATE facility f JOIN facility_type t ON t.type_code=? LEFT JOIN facility_update_rule r ON r.facility_type_id=t.id AND r.enabled=1 SET f.name=?, f.campus=?, f.building=?, f.floor=?, f.area=?, f.detail_location=?, f.latitude=?, f.longitude=?, f.brand=?, f.model=?, f.specification=?, f.manufacture_date=?, f.commissioned_date=?, f.lifecycle_status=?, f.facility_type_id=t.id, f.update_rule_id=COALESCE(f.update_rule_id,r.id), f.next_maintenance_at=CASE WHEN f.next_maintenance_at IS NULL AND r.maintenance_cycle_months IS NOT NULL THEN DATE_ADD(COALESCE(?,?), INTERVAL r.maintenance_cycle_months MONTH) ELSE f.next_maintenance_at END WHERE f.id=?",
-                r.facilityType,r.name,r.campus,r.building,r.floor,r.area,r.detailLocation,r.latitude,r.longitude,r.brand,r.model,r.specification,r.manufactureDate,r.commissionedDate,r.lifecycleStatus,r.commissionedDate,r.manufactureDate,r.id);
+        return jdbcTemplate.update("UPDATE facility f JOIN facility_type t ON t.type_code=? LEFT JOIN facility_update_rule r ON r.facility_type_id=t.id AND r.enabled=1 SET f.name=?, f.campus=?, f.building=?, f.floor=?, f.area=?, f.detail_location=?, f.latitude=?, f.longitude=?, f.location_accuracy_meters=COALESCE(?,f.location_accuracy_meters), f.brand=?, f.model=?, f.specification=?, f.manufacture_date=?, f.commissioned_date=?, f.lifecycle_status=?, f.facility_type_id=t.id, f.update_rule_id=COALESCE(f.update_rule_id,r.id), f.next_maintenance_at=CASE WHEN f.next_maintenance_at IS NULL AND r.maintenance_cycle_months IS NOT NULL THEN DATE_ADD(COALESCE(?,?), INTERVAL r.maintenance_cycle_months MONTH) ELSE f.next_maintenance_at END WHERE f.id=?",
+                r.facilityType,r.name,r.campus,r.building,r.floor,r.area,r.detailLocation,r.latitude,r.longitude,r.locationAccuracyMeters,r.brand,r.model,r.specification,r.manufactureDate,r.commissionedDate,r.lifecycleStatus,r.commissionedDate,r.manufactureDate,r.id);
     }
 
     public Optional<FacilityDtos.Summary> findById(long id) { return query(select+"WHERE f.id=?", id).stream().findFirst(); }
@@ -83,6 +112,8 @@ public class FacilityRepository {
     public int renewQr(long id) { return jdbcTemplate.update("UPDATE facility SET qr_token=? WHERE id=?", UUID.randomUUID().toString().replace("-", ""), id); }
     public Integer count(String sql, long id) { return jdbcTemplate.queryForObject(sql, Integer.class, id); }
     public int delete(long id) { return jdbcTemplate.update("DELETE FROM facility WHERE id=?", id); }
+    public int update(String sql, Object... args) { return jdbcTemplate.update(sql, args); }
+    public List<Map<String,Object>> findRows(String sql, Object... args) { return jdbcTemplate.queryForList(sql, args); }
     public List<Map<String,Object>> findTypes() { return jdbcTemplate.queryForList("SELECT type_code AS typeCode,type_name AS typeName FROM facility_type WHERE enabled=1 ORDER BY id"); }
 
     public Map<String, String> findItemNames(String typeCode) {
@@ -106,17 +137,26 @@ public class FacilityRepository {
     }
 
     public List<FacilityDtos.Component> findComponents(long facilityId) {
-        return jdbcTemplate.query("SELECT item_code,item_name,manufacture_date FROM facility_component WHERE facility_id=? ORDER BY id",
+        return jdbcTemplate.query("SELECT fc.item_code,fc.item_name,fc.manufacture_date,fc.created_at," + componentCycleMonths + " AS maintenance_cycle_months," +
+                        "TIMESTAMPADD(MONTH," + componentCycleMonths + ",fc.manufacture_date) AS next_maintenance_at " +
+                        "FROM facility_component fc JOIN facility f ON f.id=fc.facility_id " +
+                        "LEFT JOIN inspection_item ii ON ii.facility_type_id=f.facility_type_id AND ii.item_code=fc.item_code " +
+                        "WHERE fc.facility_id=? ORDER BY fc.id",
                 (rs, n) -> {
                     FacilityDtos.Component c = new FacilityDtos.Component();
                     c.itemCode = rs.getString("item_code");
                     c.itemName = rs.getString("item_name");
                     if (rs.getDate("manufacture_date") != null) c.manufactureDate = rs.getDate("manufacture_date").toLocalDate();
+                    if (rs.getTimestamp("created_at") != null) c.createdAt = rs.getTimestamp("created_at").toLocalDateTime();
+                    if (rs.getObject("maintenance_cycle_months") != null) {
+                        c.maintenanceCycleMonths = rs.getInt("maintenance_cycle_months");
+                        if (c.manufactureDate != null && rs.getDate("next_maintenance_at") != null) c.nextMaintenanceAt = rs.getDate("next_maintenance_at").toLocalDate();
+                    }
                     return c;
                 }, facilityId);
     }
 
     private List<FacilityDtos.Summary> query(String sql, Object... args) {
-        return jdbcTemplate.query(sql, (rs,n)-> { FacilityDtos.Summary s=new FacilityDtos.Summary(); s.id=rs.getLong("id"); s.facilityNo=rs.getString("facility_no"); s.facilityType=rs.getString("type_code"); s.name=rs.getString("name"); s.campus=rs.getString("campus"); s.building=rs.getString("building"); s.floor=rs.getString("floor"); s.area=rs.getString("area"); s.detailLocation=rs.getString("detail_location"); s.latitude=rs.getBigDecimal("latitude"); s.longitude=rs.getBigDecimal("longitude"); s.qrToken=rs.getString("qr_token"); s.brand=rs.getString("brand"); s.model=rs.getString("model"); s.specification=rs.getString("specification"); if(rs.getDate("manufacture_date")!=null)s.manufactureDate=rs.getDate("manufacture_date").toLocalDate(); if(rs.getDate("commissioned_date")!=null)s.commissionedDate=rs.getDate("commissioned_date").toLocalDate(); s.lifecycleStatus=rs.getString("lifecycle_status"); s.updateRuleId=rs.getObject("update_rule_id",Long.class); if(rs.getDate("expected_update_date")!=null)s.expectedUpdateDate=rs.getDate("expected_update_date").toLocalDate(); if(rs.getTimestamp("next_maintenance_at")!=null)s.nextMaintenanceAt=rs.getTimestamp("next_maintenance_at").toLocalDateTime(); return s; }, args);
+        return jdbcTemplate.query(sql, (rs,n)-> { FacilityDtos.Summary s=new FacilityDtos.Summary(); s.id=rs.getLong("id"); s.facilityNo=rs.getString("facility_no"); s.facilityType=rs.getString("type_code"); s.name=rs.getString("name"); s.campus=rs.getString("campus"); s.building=rs.getString("building"); s.floor=rs.getString("floor"); s.area=rs.getString("area"); s.detailLocation=rs.getString("detail_location"); s.latitude=rs.getBigDecimal("latitude"); s.longitude=rs.getBigDecimal("longitude"); s.locationAccuracyMeters=rs.getBigDecimal("location_accuracy_meters"); s.qrToken=rs.getString("qr_token"); s.brand=rs.getString("brand"); s.model=rs.getString("model"); s.specification=rs.getString("specification"); if(rs.getDate("manufacture_date")!=null)s.manufactureDate=rs.getDate("manufacture_date").toLocalDate(); if(rs.getDate("commissioned_date")!=null)s.commissionedDate=rs.getDate("commissioned_date").toLocalDate(); s.lifecycleStatus=rs.getString("lifecycle_status"); s.updateRuleId=rs.getObject("update_rule_id",Long.class); if(rs.getDate("expected_update_date")!=null)s.expectedUpdateDate=rs.getDate("expected_update_date").toLocalDate(); if(rs.getTimestamp("next_maintenance_at")!=null)s.nextMaintenanceAt=rs.getTimestamp("next_maintenance_at").toLocalDateTime(); s.componentCount=rs.getInt("component_count"); s.photoCount=rs.getInt("photo_count"); return s; }, args);
     }
 }

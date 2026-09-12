@@ -1,4 +1,4 @@
-const { request, getLocation } = require('./api')
+const { request, getLocation, getStableLocation } = require('./api')
 
 function parseQrToken(raw) {
   const text = (raw || '').trim()
@@ -26,42 +26,62 @@ function scanQrToken() {
   })
 }
 
-function locationText(task) {
-  return [task.campus, task.building, task.floor, task.area, task.detail_location].filter(Boolean).join(' / ')
+function locationText(facility) {
+  return [facility.campus, facility.building, facility.floor, facility.area, facility.detailLocation].filter(Boolean).join(' / ')
 }
 
-function navigateToInspect(task, session) {
+function navigateToInspect(facility, session) {
   const query = [
     `sessionId=${session.sessionId}`,
-    `taskId=${task.id}`,
-    `facilityType=${task.facility_type || 'OTHER'}`,
-    `name=${encodeURIComponent(task.name)}`,
-    `no=${encodeURIComponent(task.facility_no)}`,
-    `location=${encodeURIComponent(locationText(task))}`,
+    `facilityType=${facility.facilityType || 'FIRE_HYDRANT'}`,
+    `name=${encodeURIComponent(facility.name)}`,
+    `no=${encodeURIComponent(facility.facilityNo)}`,
+    `location=${encodeURIComponent(locationText(facility))}`,
   ].join('&')
   wx.navigateTo({ url: `/pages/inspect/inspect?${query}` })
 }
 
-async function startSession(task, qrToken) {
-  const app = getApp()
-  const location = await getLocation()
-  wx.showLoading({ title: '正在开始', mask: true })
+/** 设施驱动巡检：扫码后直接对该设施开始巡检会话，无需提前生成任务；本人未完成的会话自动续检 */
+async function startSession(facility, qrToken) {
+  wx.showLoading({ title: '定位中 1/4', mask: true })
   let session
   try {
+    const location = await getStableLocation((current, total) => {
+      wx.showLoading({ title: `定位中 ${current}/${total}`, mask: true })
+    })
+    wx.showLoading({ title: '正在校验位置', mask: true })
     session = await request('/inspection/sessions', {
       method: 'POST',
+      // 定位校验阈值由后端统一控制（默认100米），客户端不再放宽
       data: {
-        taskId: task.id,
         qrToken,
         latitude: location.latitude,
         longitude: location.longitude,
-        allowedDistanceMeters: app.allowedDistanceMeters(),
+        accuracyMeters: location.accuracy,
       },
     })
+  } catch (error) {
+    if (error && /当前定位距离设施约/.test(error.message || '')) {
+      error.code = 'LOCATION_TOO_FAR'
+      error.canRetryLocation = true
+    }
+    throw error
   } finally {
     wx.hideLoading()
   }
-  navigateToInspect(task, session)
+  navigateToInspect(facility, session)
+}
+
+async function startSessionWithRetryContext(facility, qrToken) {
+  try {
+    return await startSession(facility, qrToken)
+  } catch (error) {
+    if (error && error.canRetryLocation) {
+      error.retryFacility = facility
+      error.retryQrToken = qrToken
+    }
+    throw error
+  }
 }
 
 async function resolveToken(token) {
@@ -70,8 +90,8 @@ async function resolveToken(token) {
 
 async function startByScan() {
   const token = await scanQrToken()
-  wx.showLoading({ title: '正在匹配任务', mask: true })
-  let task
+  wx.showLoading({ title: '正在识别二维码', mask: true })
+  let facility
   try {
     const result = await resolveToken(token)
     if (result.type === 'BLANK') {
@@ -80,23 +100,19 @@ async function startByScan() {
     if (result.type !== 'FACILITY' || !result.facility) {
       throw new Error(result.message || '二维码无效，请扫描张贴在设施上的巡检二维码')
     }
-    task = await resolveTaskByFacility(result.facility)
+    facility = result.facility
   } finally {
     wx.hideLoading()
   }
-  await startSession(task, token)
+  await startSessionWithRetryContext(facility, token)
   return true
 }
 
-async function resolveTaskByFacility(facility) {
-  const tasks = await request('/inspection/tasks', { data: {} })
-  const pending = (tasks || [])
-    .filter(t => t.facility_id === facility.id && t.status !== 'COMPLETED')
-    .sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')))
-  if (!pending.length) {
-    throw new Error(`「${facility.name}」当前没有待巡检任务`)
+async function retryLocation(error) {
+  if (!error || !error.retryFacility || !error.retryQrToken) {
+    throw new Error('本次扫码信息已失效，请重新扫描设施二维码')
   }
-  return pending[0]
+  return startSessionWithRetryContext(error.retryFacility, error.retryQrToken)
 }
 
 function scanRawCode() {
@@ -150,4 +166,26 @@ async function startCollectByScan() {
   throw new Error(result.message || '二维码无效，请扫描张贴在设备上的空白设施码')
 }
 
-module.exports = { parseQrToken, scanQrToken, locationText, startSession, startByScan, startCollectByScan }
+/** 访客只读扫码：识别设施码后进入只读查看页（状态 + 历史记录），不创建巡检会话 */
+async function previewByScan() {
+  const app = getApp()
+  const token = await scanQrToken()
+  wx.showLoading({ title: '正在识别二维码', mask: true })
+  let result
+  try {
+    result = await resolveToken(token)
+  } finally {
+    wx.hideLoading()
+  }
+  if (result.type === 'FACILITY' && result.facility) {
+    app.globalData.viewFacility = result.facility
+    wx.navigateTo({ url: '/pages/facility-view/facility-view' })
+    return true
+  }
+  if (result.type === 'BLANK') {
+    throw new Error('该二维码还未绑定设施（尚未建档），暂无可查看的信息')
+  }
+  throw new Error(result.message || '二维码无效，请扫描张贴在设施上的巡检二维码')
+}
+
+module.exports = { parseQrToken, scanQrToken, locationText, startSession, startByScan, retryLocation, startCollectByScan, previewByScan, resolveToken }

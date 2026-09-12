@@ -2,7 +2,7 @@
   <view class="card intro-card">
     <view class="auto-name">
       <view class="auto-name-label">设施名称（按位置自动拼接，无需填写）</view>
-      <view class="auto-name-value {{form.name ? '' : 'auto-name-empty'}}">{{form.name || '填写下方校区、楼栋、楼层、区域、详细位置后自动生成'}}</view>
+      <view class="auto-name-value {{form.name ? '' : 'auto-name-empty'}}">{{form.name || '填写下方校区、楼栋、楼层、区域后自动生成'}}</view>
     </view>
     <view wx:if="{{editingId}}">
       <view class="card-title">编辑设施档案（{{editingNo}}）</view>
@@ -15,7 +15,7 @@
         <view wx:if="{{labelLocked}}" class="claim-loc">标签位置：{{form.campus}} / {{form.building}} / {{form.floor}}{{claimLocation.locationLabel ? ' / ' + claimLocation.locationLabel : ''}}（自动带入）</view>
         <view>保存档案后将自动绑定该二维码</view>
       </view>
-      <view class="muted">设施编号由系统自动生成、设施名称按位置自动拼接，均无需填写。请对照现场勾选该位置包含的部件并补全生产日期。保存后此设备上的二维码立即生效，可用于保安扫码巡检。</view>
+      <view class="muted">设施编号由系统自动生成、设施名称按位置自动拼接，均无需填写。请对照现场勾选该位置包含的部件，生产日期可按需填写。保存后此设备上的二维码立即生效，可用于保安扫码巡检。</view>
     </view>
   </view>
 
@@ -29,17 +29,17 @@
       </picker>
     </view>
     <view class="field component-section" wx:if="{{componentList.length}}">
-      <text class="field-label">该位置包含部件（勾选并填写生产日期）*</text>
+      <text class="field-label">该位置包含部件（勾选即可，生产日期选填）*</text>
       <view wx:for="{{componentList}}" wx:key="itemCode" class="component-row">
         <view class="component-head" data-code="{{item.itemCode}}" bindtap="onComponentToggle">
           <view class="component-check {{item.checked ? 'checked' : ''}}">{{item.checked ? '✓' : ''}}</view>
           <view class="component-name">{{item.itemName}}</view>
         </view>
         <picker mode="date" value="{{item.manufactureDate}}" disabled="{{!item.checked}}" data-code="{{item.itemCode}}" bindchange="onComponentDateChange">
-          <view class="component-date {{item.checked ? (item.manufactureDate ? '' : 'component-date-empty') : 'component-date-disabled'}}">生产日期：{{item.checked ? (item.manufactureDate || '请选择') : '未勾选'}}</view>
+          <view class="component-date {{item.checked ? '' : 'component-date-disabled'}}">生产日期：{{item.checked ? (item.manufactureDate || '选填') : '未勾选'}}</view>
         </picker>
       </view>
-      <view class="muted component-hint">对照现场实际配备勾选，未配备的部件请取消勾选</view>
+      <view class="muted component-hint">对照现场实际配备勾选，未配备的部件请取消勾选；生产日期不清楚可不填</view>
     </view>
     <view class="field">
       <text class="field-label">设施编号（系统自动生成，不可修改）</text>
@@ -68,38 +68,28 @@
         <input class="field-input" value="{{form.area}}" data-field="area" bindinput="onInput" placeholder="例如 东侧走廊" placeholder-class="ph" />
       </view>
     </view>
-    <view class="field">
-      <text class="field-label">详细位置 *</text>
-      <input class="field-input" value="{{form.detailLocation}}" data-field="detailLocation" bindinput="onInput" placeholder="例如 消防栓旁立柱" placeholder-class="ph" />
-    </view>
-    <view class="field-row">
-      <view class="field half">
-        <text class="field-label">品牌</text>
-        <input class="field-input" value="{{form.brand}}" data-field="brand" bindinput="onInput" placeholder="选填" placeholder-class="ph" />
-      </view>
-      <view class="field half">
-        <text class="field-label">型号</text>
-        <input class="field-input" value="{{form.model}}" data-field="model" bindinput="onInput" placeholder="选填" placeholder-class="ph" />
-      </view>
-    </view>
-    <view class="field">
-      <text class="field-label">规格</text>
-      <input class="field-input" value="{{form.specification}}" data-field="specification" bindinput="onInput" placeholder="选填，例如 4kg 干粉" placeholder-class="ph" />
-    </view>
-    <view class="field-row">
-      <view class="field half"><text class="field-label">生产日期</text><picker mode="date" value="{{form.manufactureDate}}" bindchange="onManufactureDateChange"><view class="field-input picker-value">{{form.manufactureDate || '选填'}}</view></picker></view>
-      <view class="field half"><text class="field-label">投用日期</text><picker mode="date" value="{{form.commissionedDate}}" bindchange="onCommissionedDateChange"><view class="field-input picker-value">{{form.commissionedDate || '选填'}}</view></picker></view>
-    </view>
     <view wx:if="{{ruleHint}}" class="rule-hint">{{ruleHint}}</view>
     <view class="field">
       <text class="field-label">安装位置坐标 *</text>
       <view class="loc-row">
         <view class="field-input loc-value">
-          {{form.latitude ? form.latitude + ' , ' + form.longitude : '未采集'}}
+          {{form.latitude ? form.latitude + ' , ' + form.longitude + (form.locationAccuracyMeters ? '（精度约±' + form.locationAccuracyMeters + '米）' : '') : '未采集'}}
         </view>
         <button class="btn-mini" bindtap="captureLocation">采集当前位置</button>
       </view>
       <view class="muted">请站在设施旁边点击采集，坐标用于巡检定位校验</view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">{{photoCardTitle}}</view>
+    <view class="muted photo-hint">只能现场调用摄像头拍摄，禁止从相册选择。照片随档案保存时自动上传，加采集时间与位置水印留档{{editingId ? '；编辑时可补拍或删除不需要的照片' : ''}}</view>
+    <view class="photo-grid">
+      <view wx:for="{{photos}}" wx:key="key" class="photo-cell">
+        <image src="{{item.path}}" mode="aspectFill" class="photo-img" />
+        <view class="photo-del" data-index="{{index}}" catchtap="removePhoto">删除</view>
+      </view>
+      <view wx:if="{{photos.length < maxPhotos}}" class="photo-add" bindtap="takeFacilityPhoto">＋ 拍照</view>
     </view>
   </view>
 

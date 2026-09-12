@@ -65,6 +65,20 @@ public class UserAdminController {
         return ApiResponse.success(Collections.singletonMap("created", true));
     }
 
+    /** 一键重置密码：重置为默认密码 123456，供管理员为忘记密码的现场人员恢复 */
+    @PostMapping("/{id}/reset-password")
+    public ApiResponse<?> resetPassword(@PathVariable long id, Authentication authentication) {
+        AuthenticatedUser operator = requireAdmin(authentication);
+        Map<String, Object> target = jdbcTemplate.queryForList(
+                "SELECT u.id, u.username FROM app_user u WHERE u.id=?", id)
+                .stream().findFirst().orElseThrow(() -> new IllegalArgumentException("用户不存在"));
+        jdbcTemplate.update("UPDATE app_user SET password_hash=? WHERE id=?",
+                passwordEncoder.encode("123456"), id);
+        auditService.record(operator.getId(), "USER_RESET_PASSWORD", "APP_USER",
+                String.valueOf(target.get("username")), Collections.singletonMap("defaultPassword", "123456"));
+        return ApiResponse.success(Collections.singletonMap("reset", true));
+    }
+
     private AuthenticatedUser requireAdmin(Authentication authentication) {
         AuthenticatedUser user = authService.loadCurrentUser(authentication.getName());
         if (!"ADMIN".equals(user.getRoleCode())) throw new AccessDeniedException("仅管理员可以管理用户账号");
@@ -108,10 +122,8 @@ public class UserAdminController {
                 .stream().findFirst().orElseThrow(() -> new IllegalArgumentException("用户不存在"));
         String[] references = {
                 "SELECT COUNT(*) FROM inspection_record WHERE user_id=?",
-                "SELECT COUNT(*) FROM inspection_task WHERE assigned_user_id=?",
                 "SELECT COUNT(*) FROM maintenance_record WHERE created_by=?",
                 "SELECT COUNT(*) FROM rectification_order WHERE resolved_by=?",
-                "SELECT COUNT(*) FROM inspection_plan WHERE assigned_user_id=? AND deleted=0",
         };
         for (String sql : references) {
             Integer count = jdbcTemplate.queryForObject(sql, Integer.class, id);

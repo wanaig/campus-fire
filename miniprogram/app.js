@@ -2,8 +2,8 @@ App({
   globalData: {
     user: null,
     largeText: false,
-    demoMode: false,
     editFacility: null,
+    viewFacility: null,
     claimToken: null,
     claimSerial: null,
     claimLocation: null,
@@ -11,10 +11,21 @@ App({
   onLaunch() {
     this.globalData.user = wx.getStorageSync('user') || null
     this.globalData.largeText = wx.getStorageSync('largeText') === 'true'
-    this.globalData.demoMode = wx.getStorageSync('demoMode') === 'true'
   },
   isLoggedIn() {
     return Boolean(wx.getStorageSync('token') && this.globalData.user)
+  },
+  // 访客模式：无需登录，只读查看设施巡检状态和历史记录
+  isVisitor() {
+    return !this.isLoggedIn() && wx.getStorageSync('visitorMode') === 'true'
+  },
+  setVisitor() {
+    wx.setStorageSync('visitorMode', 'true')
+    this.globalData.visitorMode = true
+  },
+  clearVisitor() {
+    wx.removeStorageSync('visitorMode')
+    this.globalData.visitorMode = false
   },
   setUser(user, token) {
     this.globalData.user = user
@@ -25,9 +36,6 @@ App({
     this.globalData.user = null
     wx.removeStorageSync('token')
     wx.removeStorageSync('user')
-  },
-  allowedDistanceMeters() {
-    return this.globalData.demoMode ? 10000 : 100
   },
   homePath(roleCode) {
     if (roleCode === 'COLLECTOR') return '/pages/collect/collect'

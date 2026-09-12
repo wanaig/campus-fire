@@ -53,7 +53,7 @@ public class FacilityOperationsController {
         Map<String,Object> data=new LinkedHashMap<>();
         data.put("lifecycle",jdbcTemplate.queryForList("SELECT e.id,e.event_type,e.event_note,e.event_at,u.display_name AS operator FROM facility_lifecycle_event e JOIN app_user u ON u.id=e.operator_user_id WHERE e.facility_id=? ORDER BY e.event_at DESC",id));
         data.put("maintenance",jdbcTemplate.queryForList("SELECT m.id,m.maintenance_type,m.maintenance_at,m.maintainer,m.result_note,m.next_maintenance_at,m.evidence_urls,u.display_name AS creator FROM maintenance_record m JOIN app_user u ON u.id=m.created_by WHERE m.facility_id=? ORDER BY m.maintenance_at DESC",id));
-        data.put("inspections",jdbcTemplate.queryForList("SELECT r.id,r.submitted_at,r.note,r.photo_count,u.display_name AS inspector FROM inspection_record r JOIN inspection_task t ON t.id=r.task_id JOIN app_user u ON u.id=r.user_id WHERE t.facility_id=? ORDER BY r.submitted_at DESC",id));
+        data.put("inspections",jdbcTemplate.queryForList("SELECT r.id,r.submitted_at,r.note,r.photo_count,u.display_name AS inspector FROM inspection_record r JOIN app_user u ON u.id=r.user_id WHERE r.facility_id=? ORDER BY r.submitted_at DESC",id));
         return ApiResponse.success(data);
     }
 

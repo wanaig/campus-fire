@@ -53,13 +53,20 @@
   height: 100%;
   display: flex;
   align-items: flex-end;
+  justify-content: center;
 }
 .trend-bar {
   width: 100%;
+  max-width: 32rpx;
   background: #b42318;
   border-radius: 6rpx 6rpx 0 0;
   opacity: 0.8;
   min-height: 8rpx;
+}
+.trend-bar.empty {
+  background: #e2e8ec;
+  opacity: 1;
+  border-radius: 0 0 3rpx 3rpx;
 }
 .dist-row {
   display: flex;
@@ -96,4 +103,16 @@
 .retry-btn {
   margin-top: 24rpx;
   padding: 12rpx 40rpx;
+}
+.maint-hint {
+  margin: -4rpx 0 8rpx;
+}
+.maint-tap {
+  border-radius: 12rpx;
+}
+.maint-hover {
+  background: #f4f6f8;
+}
+.page-large .maint-date {
+  margin-top: 8rpx;
 }
