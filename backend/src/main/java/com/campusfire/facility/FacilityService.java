@@ -44,6 +44,8 @@ public class FacilityService {
                 throw new IllegalArgumentException("该二维码已绑定设施，不能重复使用");
             long id = repository.insert(request, operatorId, claimed);
             if (repository.bindQrToken(claimed, id) == 0) throw new IllegalArgumentException("该二维码刚被其他设施占用，请重新扫码");
+            // 建档填写的校区/楼栋/楼层/区域回写到二维码标签（仅补空字段），管理端"分级位置/自定义名称"随之同步
+            repository.backfillQrLocation(claimed, request.campus, request.building, request.floor, request.area);
             repository.applyDefaultRule(id);
             saveComponents(id, request.facilityType, request.components);
             FacilityDtos.Summary facility = detail(id);

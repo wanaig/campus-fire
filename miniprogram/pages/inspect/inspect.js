@@ -18,6 +18,7 @@ Page({
     promptText: '',
     photos: [],
     maxPhotos: 6,
+    locationRequired: true,
     loading: true,
     error: '',
     submitting: false,
@@ -41,6 +42,8 @@ Page({
       facilityType: query.facilityType || 'FIRE_HYDRANT',
       inspectionTitle: (query.facilityType || 'FIRE_HYDRANT') === 'FIRE_HYDRANT' ? '室内消火栓巡检记录' : '消防设施巡检记录',
       inspectorName: (app.globalData.user && app.globalData.user.displayName) || '',
+      // 管理端定位校验开关：关闭时拍照上传不再等待定位（query 布尔值以字符串传递）
+      locationRequired: query.locationRequired !== 'false',
     })
     this.load()
   },
@@ -121,11 +124,13 @@ Page({
       })
       if (!choice || !choice.tempFiles || !choice.tempFiles.length) return
       wx.showLoading({ title: '正在上传照片', mask: true })
-      const location = await getLocation()
+      // 定位校验关闭时跳过定位采集，坐标以空值上传（水印标注“未采集定位”）
+      const location = this.data.locationRequired ? await getLocation() : null
       const uploaded = []
       for (const file of choice.tempFiles) {
         const result = await uploadPhoto(this.data.sessionId, file.tempFilePath,
-          location.latitude, location.longitude, location.accuracy)
+          location ? location.latitude : null, location ? location.longitude : null,
+          location ? location.accuracy : null)
         uploaded.push({ path: file.tempFilePath, photoId: result.photoId })
       }
       this.setData({ photos: this.data.photos.concat(uploaded) })

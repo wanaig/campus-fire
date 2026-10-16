@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  Button, FluentProvider, Input, Label, MessageBar, MessageBarBody, Skeleton, SkeletonItem, Textarea,
-  Spinner, Tooltip, webLightTheme,
+  Button, FluentProvider, Input, Label, MessageBar, MessageBarBody, Skeleton, SkeletonItem, Spinner, Switch, Textarea,
+  Tooltip, webLightTheme,
 } from '@fluentui/react-components'
 import {
   Add24Regular, Alert24Regular, ArrowClockwise20Regular, Building24Regular, CalendarClock24Regular,
@@ -12,6 +12,7 @@ import {
 } from '@fluentui/react-icons'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from 'recharts'
 import { api } from './api'
+import QRCode from 'qrcode'
 
 const statusText = { OPEN: '待整改', RESOLVED: '已整改' }
 const pageTitle = {
@@ -267,8 +268,13 @@ function QrCodePage() {
   const [commonLabelsText, setCommonLabelsText] = useState('')
   const [specialFloors, setSpecialFloors] = useState([{ floor: '', labelsText: '' }])
   const [renameItem, setRenameItem] = useState(null)
-  const [renameValue, setRenameValue] = useState('')
+  const [renameForm, setRenameForm] = useState({ campus: '', building: '', floor: '', locationLabel: '' })
+  const [qrViewItem, setQrViewItem] = useState(null)
+  const [qrDataUrl, setQrDataUrl] = useState('')
+  const [qrViewError, setQrViewError] = useState('')
   const [selectedIds, setSelectedIds] = useState([])
+  const [importOpen, setImportOpen] = useState(false)
+  const [importText, setImportText] = useState('')
   const [page, setPage] = useState(1)
   const [size, setSize] = useState(20)
   const [total, setTotal] = useState(0)
@@ -405,24 +411,26 @@ function QrCodePage() {
   async function deleteQr(item) {
     const hierarchy = hierarchyParts(item).join(' / ') || `NO.${String(item.serial_no).padStart(3, '0')}`
     const warning = item.status === 'BOUND'
-      ? `该二维码已绑定设施。删除后原标签立即失效，相关设施需要重新绑定其他二维码。确定删除「${hierarchy}」吗？`
+      ? `该二维码已绑定设施。删除后将同步删除绑定的设施档案及其全部巡检记录、照片、整改单等关联数据（同“重置为未绑定”的清理范围），删除二维码本身可在“已删除”中恢复。确定删除「${hierarchy}」吗？`
       : `确定删除二维码「${hierarchy}」吗？删除后可在“已删除”中恢复。`
     if (!window.confirm(warning)) return
     setBusy(true); setError(''); setSuccess('')
     try {
       await api.deleteQrCode(item.id)
-      setSuccess('二维码已删除')
+      setSuccess(item.status === 'BOUND' ? '二维码已删除，其绑定的设施档案及巡检记录已同步清理' : '二维码已删除')
       await load()
     } catch (cause) { setError(cause.message) } finally { setBusy(false) }
   }
 
   async function batchDeleteQr() {
     if (!selectedIds.length) return
-    if (!window.confirm(`确定删除已选择的 ${selectedIds.length} 个二维码吗？删除后可在“已删除”中恢复。`)) return
+    const boundCount = items.filter(item => selectedIds.includes(item.id) && item.status === 'BOUND').length
+    const boundWarning = boundCount ? `其中 ${boundCount} 个已绑定设施，将同步删除对应设施档案及其巡检记录等关联数据。` : ''
+    if (!window.confirm(`确定删除已选择的 ${selectedIds.length} 个二维码吗？${boundWarning}删除的二维码可在“已删除”中恢复。`)) return
     setBusy(true); setError(''); setSuccess('')
     try {
       const result = await api.batchDeleteQrCodes(selectedIds)
-      setSuccess(`已删除 ${result.deleted} 个二维码`)
+      setSuccess(`已删除 ${result.deleted} 个二维码${boundCount ? `，并同步清理了 ${boundCount} 个绑定设施` : ''}`)
       await load()
     } catch (cause) { setError(cause.message) } finally { setBusy(false) }
   }
@@ -443,31 +451,108 @@ function QrCodePage() {
   const selectableIds = items.filter(item => item.status !== 'DELETED').map(item => item.id)
   const allSelected = selectableIds.length > 0 && selectableIds.every(id => selectedIds.includes(id))
 
+  /** 标签 PDF 下载：勾选了复选框只下载勾选的，未勾选按当前筛选下载全部（后端 labels.pdf 已支持 ids 参数）。 */
   async function downloadLabels() {
     setError('')
     setBusy(true)
     try {
-      await api.downloadQrLabelsPdf(status, [], appliedKeyword)
+      await api.downloadQrLabelsPdf(status, selectedIds, appliedKeyword)
+      if (selectedIds.length) setSuccess(`已下载勾选的 ${selectedIds.length} 个二维码标签 PDF`)
     } catch (cause) { setError(cause.message) } finally { setBusy(false) }
   }
 
   function openRename(item) {
     setError(''); setSuccess('')
     setRenameItem(item)
-    setRenameValue(item.location_label || '')
+    setRenameForm({ campus: item.campus || '', building: item.building || '', floor: item.floor || '', locationLabel: item.location_label || '' })
   }
 
-  async function submitRename() {
-    const label = renameValue.trim()
-    if (!label) return setError('请输入二维码名称')
-    if (label.length > 120) return setError('二维码名称不能超过 120 个字符')
+  /** 单个二维码预览：前端直接按码值生成图片，与标签 PDF 内容一致，无需下载整份 PDF。 */
+  function openQrView(item) {
+    setQrViewItem(item)
+    setQrDataUrl('')
+    setQrViewError('')
+    QRCode.toDataURL(item.token, { width: 512, margin: 2, errorCorrectionLevel: 'M' })
+      .then(url => setQrDataUrl(url))
+      .catch(() => setQrViewError('二维码生成失败，请稍后重试'))
+  }
+
+  function downloadQrPng() {
+    if (!qrDataUrl || !qrViewItem) return
+    const link = document.createElement('a')
+    link.href = qrDataUrl
+    link.download = `qr-label-NO${String(qrViewItem.serial_no).padStart(3, '0')}.png`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
+  /** 批量下载勾选的二维码：逐个生成 PNG 后打包成 ZIP，避免浏览器拦截多次下载。 */
+  async function batchDownloadQr() {
+    const rows = items.filter(item => selectedIds.includes(item.id) && item.status !== 'DELETED')
+    if (!rows.length) return setError('请先用复选框选择要下载的二维码')
     setBusy(true); setError(''); setSuccess('')
     try {
-      await api.updateQrLabel(renameItem.id, label)
+      const JSZip = (await import('jszip')).default
+      const zip = new JSZip()
+      for (const row of rows) {
+        const url = await QRCode.toDataURL(row.token, { width: 512, margin: 2, errorCorrectionLevel: 'M' })
+        const label = (row.location_label || '').replace(/[\\/:*?"<>|]+/g, '-').trim().slice(0, 40)
+        zip.file(`NO${String(row.serial_no).padStart(3, '0')}${label ? `-${label}` : ''}.png`, url.split(',')[1], { base64: true })
+      }
+      const blob = await zip.generateAsync({ type: 'blob' })
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = `qr-labels-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')}.zip`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(link.href)
+      setSuccess(`已打包下载 ${rows.length} 个二维码图片`)
+    } catch (cause) { setError(cause.message) } finally { setBusy(false) }
+  }
+
+  /** 修改二维码的位置与名称：可改校区/楼栋/楼层/自定义名称，码值和系统序号保持不变。 */
+  async function submitRename() {
+    const campus = renameForm.campus.trim()
+    const building = renameForm.building.trim()
+    const floor = renameForm.floor.trim()
+    if (!campus || !building || !floor) return setError('校区、楼栋和楼层必须填写完整')
+    const locationLabel = renameForm.locationLabel.trim()
+    if (locationLabel.length > 120) return setError('二维码名称不能超过 120 个字符')
+    setBusy(true); setError(''); setSuccess('')
+    try {
+      await api.updateQrInfo(renameItem.id, { campus, building, floor, locationLabel })
       setRenameItem(null)
-      setRenameValue('')
-      setSuccess(`二维码名称已修改为“${label}”`)
+      setSuccess('二维码位置与名称已更新（码值和系统序号保持不变）')
       await load()
+    } catch (cause) { setError(cause.message) } finally { setBusy(false) }
+  }
+
+  /** 码值清单导出：勾选了复选框只导出勾选的，未勾选按当前筛选导出全部；作为码值备份防丢失。 */
+  async function exportTokens() {
+    setBusy(true); setError(''); setSuccess('')
+    try {
+      await api.downloadQrTokensCsv(status, appliedKeyword, selectedIds)
+      setSuccess(selectedIds.length
+        ? `已导出勾选的 ${selectedIds.length} 个二维码码值`
+        : '码值清单已导出为 CSV 文件（包含序号、码值、状态和位置信息）')
+    } catch (cause) { setError(cause.message) } finally { setBusy(false) }
+  }
+
+  const parsedImportTokens = [...new Set(String(importText).split(/[\s,;，；]+/).map(value => value.trim()).filter(Boolean))]
+
+  /** 码值导入：粘贴既有码值批量重新入库，已存在的跳过、已删除的自动恢复为未绑定，实现码值重复使用。 */
+  async function submitImport() {
+    if (!parsedImportTokens.length) return setError('请粘贴要导入的码值，每行一个')
+    if (parsedImportTokens.length > 500) return setError(`一次最多导入 500 个码值（当前识别 ${parsedImportTokens.length} 个）`)
+    setBusy(true); setError(''); setSuccess('')
+    try {
+      const result = await api.importQrTokens(parsedImportTokens)
+      setImportOpen(false)
+      setImportText('')
+      setSuccess(`导入完成：新增 ${result.imported} 个，恢复已删除 ${result.restored} 个，跳过 ${result.skipped} 个（已存在或已绑定的码值不受影响）`)
+      await load(1, size)
     } catch (cause) { setError(cause.message) } finally { setBusy(false) }
   }
 
@@ -511,7 +596,9 @@ function QrCodePage() {
     <div className="work-toolbar">
       <Input size="large" value={keyword} onChange={(_, d) => setKeyword(d.value)} placeholder="输入二维码名称、位置、码值或绑定设施" style={{ maxWidth: 320 }} />
       <Button appearance="primary" onClick={() => { setPage(1); load(1, size) }}>查询</Button>
-      <Button icon={<Print24Regular />} appearance="secondary" disabled={busy || loading || !items.length || status === 'DELETED'} onClick={downloadLabels}>下载二维码标签 PDF（当前筛选）</Button>
+      <Button icon={<Print24Regular />} appearance="secondary" disabled={busy || loading || (!items.length && !selectedIds.length) || (status === 'DELETED' && !selectedIds.length)} onClick={downloadLabels}>{selectedIds.length ? `下载二维码标签 PDF（已选 ${selectedIds.length} 个）` : '下载二维码标签 PDF（当前筛选）'}</Button>
+      <Button appearance="secondary" disabled={busy || loading || (!total && !selectedIds.length) || status === 'DELETED'} onClick={exportTokens}>{selectedIds.length ? `导出码值 CSV（已选 ${selectedIds.length} 个）` : '导出码值 CSV（当前筛选）'}</Button>
+      <Button appearance="secondary" disabled={busy} onClick={() => { setImportText(''); setImportOpen(true) }}>导入码值</Button>
     </div>
     {error && <MessageBar intent="error"><MessageBarBody>{error}</MessageBarBody></MessageBar>}
     <article className="panel data-panel">
@@ -519,7 +606,10 @@ function QrCodePage() {
         {[['', '全部'], ['UNCLAIMED', '未绑定'], ['BOUND', '已绑定'], ['DELETED', '已删除']].map(([value, label]) => (
           <button key={value} className={`chip ${status === value ? 'chip-active' : ''}`} onClick={() => setStatus(value)}>{label}</button>
         ))}
-        {status !== 'DELETED' && <Button appearance="secondary" disabled={busy || !selectedIds.length} onClick={batchDeleteQr}>批量删除（{selectedIds.length}）</Button>}
+        {status !== 'DELETED' && <>
+          <Button appearance="secondary" disabled={busy || !selectedIds.length} onClick={batchDownloadQr}>批量下载 PNG（{selectedIds.length}）</Button>
+          <Button appearance="secondary" disabled={busy || !selectedIds.length} onClick={batchDeleteQr}>批量删除（{selectedIds.length}）</Button>
+        </>}
       </div>
       {loading ? <Spinner label="正在读取二维码" /> : items.length ? <div className="table-wrap"><table className="qr-table">
         <thead><tr><th className="select-cell"><input type="checkbox" aria-label="选择本页全部二维码" disabled={!selectableIds.length || status === 'DELETED'} checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : selectableIds)} /></th><th>系统序号</th><th>分级位置 / 自定义名称</th><th>码值</th><th>状态</th><th>绑定设施</th><th>时间</th><th>操作</th></tr></thead>
@@ -533,7 +623,8 @@ function QrCodePage() {
           <td><span>{String(item.created_at).slice(0, 16).replace('T', ' ')}{item.deleted_at && <small>删除：{String(item.deleted_at).slice(0, 16).replace('T', ' ')}</small>}</span></td>
           <td><span className="row-actions">
             {item.status === 'DELETED' ? <Button size="small" appearance="primary" disabled={busy} onClick={() => restoreQr(item)}>恢复</Button> : <>
-              <Button size="small" disabled={busy} onClick={() => openRename(item)}>修改名称</Button>
+              <Button size="small" appearance="primary" disabled={busy} onClick={() => openQrView(item)}>查看二维码</Button>
+              <Button size="small" disabled={busy} onClick={() => openRename(item)}>修改名称/位置</Button>
               {item.status === 'BOUND' && <Button size="small" disabled={busy} onClick={() => resetQr(item)}>重置为未绑定</Button>}
               <Button size="small" className="btn-danger" disabled={busy} onClick={() => deleteQr(item)}>删除</Button>
             </>}
@@ -559,11 +650,48 @@ function QrCodePage() {
     <p className="muted-note">使用流程：填写楼层和各二维码的自定义名称 → 生成并打印标签 → 采集员扫码建档。已生成二维码可单独修改名称；重置为未绑定只解除与设施的绑定，码值保持不变，采集员可重新扫码采集。</p>
     {renameItem && createPortal(<FluentProvider theme={webLightTheme}><div className="dialog-backdrop" role="presentation">
       <div className="resolve-dialog" role="dialog" aria-modal="true" aria-labelledby="qr-rename-title">
-        <div><h2 id="qr-rename-title">修改二维码名称</h2><p>{[renameItem.school, renameItem.campus, renameItem.building, renameItem.floor].filter(Boolean).join(' / ')}</p></div>
-        <div className="field"><Label htmlFor="qr-label-name" required>自定义名称</Label><Input id="qr-label-name" value={renameValue} onChange={(_, d) => setRenameValue(d.value)} placeholder="例如 东楼梯口" maxLength={120} /></div>
+        <div><h2 id="qr-rename-title">修改名称与位置</h2><p>可调整分级位置（校区 / 楼栋 / 楼层）和自定义名称，码值与系统序号保持不变；修改的是二维码标签信息，不影响已绑定设施档案。</p></div>
+        <div className="form-grid">
+          <div className="field"><Label htmlFor="qr-rename-campus" required>校区</Label><Input id="qr-rename-campus" value={renameForm.campus} onChange={(_, d) => setRenameForm({ ...renameForm, campus: d.value })} placeholder="例如 主校区" /></div>
+          <div className="field"><Label htmlFor="qr-rename-building" required>楼栋</Label><Input id="qr-rename-building" value={renameForm.building} onChange={(_, d) => setRenameForm({ ...renameForm, building: d.value })} placeholder="例如 1号教学楼" /></div>
+          <div className="field"><Label htmlFor="qr-rename-floor" required>楼层</Label><Input id="qr-rename-floor" value={renameForm.floor} onChange={(_, d) => setRenameForm({ ...renameForm, floor: d.value })} placeholder="例如 1层" /></div>
+          <div className="field"><Label htmlFor="qr-rename-label">自定义名称</Label><Input id="qr-rename-label" value={renameForm.locationLabel} onChange={(_, d) => setRenameForm({ ...renameForm, locationLabel: d.value })} placeholder="例如 东楼梯口，留空则按位置自动编号" maxLength={120} /></div>
+        </div>
         <div className="dialog-actions">
-          <Button appearance="secondary" disabled={busy} onClick={() => { setRenameItem(null); setRenameValue('') }}>取消</Button>
-          <Button appearance="primary" disabled={busy || !renameValue.trim()} onClick={submitRename}>{busy ? '正在保存…' : '保存名称'}</Button>
+          <Button appearance="secondary" disabled={busy} onClick={() => { setRenameItem(null); setRenameForm({ campus: '', building: '', floor: '', locationLabel: '' }) }}>取消</Button>
+          <Button appearance="primary" disabled={busy} onClick={submitRename}>{busy ? '正在保存…' : '保存修改'}</Button>
+        </div>
+      </div>
+    </div></FluentProvider>, document.body)}
+    {importOpen && createPortal(<FluentProvider theme={webLightTheme}><div className="dialog-backdrop" role="presentation">
+      <div className="resolve-dialog" role="dialog" aria-modal="true" aria-labelledby="qr-import-title">
+        <div><h2 id="qr-import-title">按码值导入二维码</h2><p>每行粘贴一个码值（也支持逗号/分号分隔，可直接粘贴导出 CSV 里的“码值”列）。码值不存在则新增为未绑定；已被删除的自动恢复为未绑定；已存在或已绑定的自动跳过，不影响现有数据。</p></div>
+        <div className="field"><Label htmlFor="qr-import-tokens" required>码值列表（已识别 {parsedImportTokens.length} 个）</Label>
+          <Textarea id="qr-import-tokens" value={importText} onChange={(_, d) => setImportText(d.value)} resize="vertical" rows={8}
+            placeholder={'例如：\n4a6a0458ddd8480bad9ed134179cf7f8\n5f2c8e1a9b7d4c6f8a3e2d1b0c9f8e7a'} /></div>
+        <div className="dialog-actions">
+          <Button appearance="secondary" disabled={busy} onClick={() => setImportOpen(false)}>取消</Button>
+          <Button appearance="primary" disabled={busy || !parsedImportTokens.length} onClick={submitImport}>{busy ? '正在导入…' : `导入 ${parsedImportTokens.length} 个码值`}</Button>
+        </div>
+      </div>
+    </div></FluentProvider>, document.body)}
+    {qrViewItem && createPortal(<FluentProvider theme={webLightTheme}><div className="dialog-backdrop" role="presentation">
+      <div className="resolve-dialog" role="dialog" aria-modal="true" aria-labelledby="qr-view-title">
+        <div><h2 id="qr-view-title">二维码预览</h2><p>{hierarchyParts(qrViewItem).join(' / ')}</p></div>
+        <div className="qr-view-body">
+          {qrDataUrl
+            ? <img className="qr-view-image" src={qrDataUrl} width={240} height={240} alt={`NO.${String(qrViewItem.serial_no).padStart(3, '0')} 二维码`} />
+            : <Spinner label="正在生成二维码…" />}
+          <div className="qr-view-meta">
+            <p><strong>NO.{String(qrViewItem.serial_no).padStart(3, '0')}</strong>　{qrViewItem.location_label || '未命名'}</p>
+            <p>码值：<code>{qrViewItem.token}</code></p>
+            <p className="field-hint">二维码内容为码值本身，与标签 PDF 完全一致；采集员用小程序扫码即可建档/巡检。可下载 PNG 单独打印或发给采集员。</p>
+          </div>
+        </div>
+        {qrViewError && <MessageBar intent="error"><MessageBarBody>{qrViewError}</MessageBarBody></MessageBar>}
+        <div className="dialog-actions">
+          <Button appearance="secondary" onClick={() => { setQrViewItem(null); setQrDataUrl(''); setQrViewError('') }}>关闭</Button>
+          <Button appearance="primary" disabled={!qrDataUrl} onClick={downloadQrPng}>下载 PNG 图片</Button>
         </div>
       </div>
     </div></FluentProvider>, document.body)}
@@ -1312,6 +1440,35 @@ function formatMaintenanceCycle(months) {
   return months % 12 === 0 ? `${months / 12} 年` : `${months} 个月`
 }
 
+/** 扫码巡检定位校验开关：关闭后保安扫码巡检不再校验定位距离（GPS 漂移误伤时的逃生通道），修改全局即时生效 */
+function LocationValidationCard() {
+  const [enabled, setEnabled] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    api.inspectionSettings().then(data => setEnabled(!!data.locationValidationEnabled)).catch(cause => setError(cause.message))
+  }, [])
+  async function toggle(_, data) {
+    const next = data.checked
+    setSaving(true); setError('')
+    try {
+      const saved = await api.updateInspectionSettings(next)
+      setEnabled(!!saved.locationValidationEnabled)
+    } catch (cause) {
+      setError(cause.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+  return <article className="panel location-validation-card">
+    <div className="panel-head"><div><h2>扫码巡检定位校验</h2><p>开启后保安扫码巡检必须现场定位，距离设施过远将被拒绝提交；如定位漂移导致“明明在现场却被拒绝”误伤，可临时关闭。修改后约 5 秒内对小程序生效。</p></div></div>
+    {error && <MessageBar intent="error"><MessageBarBody>{error}</MessageBarBody></MessageBar>}
+    {enabled === null ? <Spinner size="tiny" label="正在读取设置" /> :
+      <Switch checked={enabled} disabled={saving} onChange={toggle}
+        label={enabled ? '已开启：扫码巡检需校验定位距离' : '已关闭：扫码巡检不校验定位（代打卡风险自负）'} />}
+  </article>
+}
+
 function InspectionItemsPage() {
   const [types, setTypes] = useState([])
   const [typeCode, setTypeCode] = useState('')
@@ -1431,6 +1588,7 @@ function InspectionItemsPage() {
     try { await api.deleteFacilityType(type.id); await refreshTypes(typeCode === type.typeCode ? '' : typeCode) } catch (cause) { setError(cause.message) }
   }
   return <section className="work-page">
+    <LocationValidationCard />
     <div className="work-toolbar">
       <select className="native-select" value={typeCode} onChange={event => { setTypeCode(event.target.value); load(event.target.value) }} aria-label="设施类型筛选">
         {types.map(t => <option key={t.typeCode} value={t.typeCode}>{t.typeName}</option>)}

@@ -3,6 +3,7 @@ package com.campusfire.inspection;
 import com.campusfire.auth.AuthService;
 import com.campusfire.auth.AuthenticatedUser;
 import com.campusfire.common.api.ApiResponse;
+import com.campusfire.common.setting.SystemSettingService;
 import com.campusfire.storage.RustFsStorageService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -45,15 +46,17 @@ public class InspectionPhotoController {
     private final AuthService authService;
     private final PhotoWatermarkService watermarkService;
     private final RustFsStorageService rustFsStorage;
+    private final SystemSettingService settingService;
     private final Path storageRoot;
 
     public InspectionPhotoController(JdbcTemplate jdbcTemplate, AuthService authService, PhotoWatermarkService watermarkService,
-                                     RustFsStorageService rustFsStorage,
+                                     RustFsStorageService rustFsStorage, SystemSettingService settingService,
                                      @Value("${app.inspection-photo.storage-path:../data/inspection-photos}") String storagePath) {
         this.jdbcTemplate = jdbcTemplate;
         this.authService = authService;
         this.watermarkService = watermarkService;
         this.rustFsStorage = rustFsStorage;
+        this.settingService = settingService;
         this.storageRoot = Paths.get(storagePath).toAbsolutePath().normalize();
     }
 
@@ -110,14 +113,18 @@ public class InspectionPhotoController {
                                  @RequestParam("captureSource") String captureSource,
                                  @RequestParam("clientCapturedAt") Instant clientCapturedAt,
                                  @RequestParam("deviceId") String deviceId,
-                                 @RequestParam("latitude") BigDecimal latitude,
-                                 @RequestParam("longitude") BigDecimal longitude,
+                                 @RequestParam(value = "latitude", required = false) BigDecimal latitude,
+                                 @RequestParam(value = "longitude", required = false) BigDecimal longitude,
                                  @RequestParam(value = "accuracyMeters", required = false) BigDecimal accuracyMeters,
                                  Authentication authentication) {
         AuthenticatedUser user = requireGuard(authentication);
         Map<String, Object> session = loadSession(sessionId, user.getId());
         validateMetadata(file, captureSource, clientCapturedAt, deviceId);
-        validateLocation(session, latitude, longitude, accuracyMeters);
+        // 管理端定位校验开关：开启时必须携带定位并校验距离；关闭时允许无定位上传（水印标注“未采集定位”）
+        if (settingService.isLocationValidationEnabled()) {
+            LocationProximity.validateCoordinates(latitude, longitude);
+            validateLocation(session, latitude, longitude, accuracyMeters);
+        }
 
         String photoId = UUID.randomUUID().toString();
         String extension = imageExtension(file);
@@ -250,6 +257,8 @@ public class InspectionPhotoController {
     }
 
     private void validateLocation(Map<String, Object> session, BigDecimal latitude, BigDecimal longitude, BigDecimal accuracyMeters) {
+        // 会话起点无坐标（开关关闭期间开始的会话）时无从比对，直接放行
+        if (session.get("latitude") == null || session.get("longitude") == null) return;
         double distance = LocationProximity.distanceMeters((Number) session.get("latitude"), (Number) session.get("longitude"), latitude, longitude);
         double allowedDistance = LocationProximity.allowedDistanceMeters((Number) session.get("location_accuracy_meters"), accuracyMeters);
         if (distance > allowedDistance) {
@@ -268,11 +277,15 @@ public class InspectionPhotoController {
         String time = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
                 .withZone(ZoneId.of("Asia/Shanghai")).format(serverReceivedAt);
         String accuracy = accuracyMeters == null ? "精度未知" : "精度约±" + Math.round(accuracyMeters.doubleValue()) + "米";
+        // 关闭定位校验时可能没有坐标，水印如实标注，不留空白
+        String gps = latitude == null || longitude == null
+                ? "GPS：未采集定位 · " + accuracy
+                : String.format(java.util.Locale.ROOT, "GPS：%.6f, %.6f · %s", latitude.doubleValue(), longitude.doubleValue(), accuracy);
         return Arrays.asList(
                 "设施：" + facility,
                 "位置：" + String.join(" / ", locationParts),
                 "巡检：" + String.valueOf(session.get("display_name")) + " · 时间：" + time,
-                String.format(java.util.Locale.ROOT, "GPS：%.6f, %.6f · %s", latitude.doubleValue(), longitude.doubleValue(), accuracy));
+                gps);
     }
 
     private String imageExtension(MultipartFile file) {

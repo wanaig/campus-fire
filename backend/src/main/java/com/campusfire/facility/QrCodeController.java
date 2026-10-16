@@ -5,6 +5,7 @@ import com.campusfire.auth.AuthService;
 import com.campusfire.auth.AuthenticatedUser;
 import com.campusfire.common.api.ApiResponse;
 import com.campusfire.common.pdf.PdfService;
+import com.campusfire.common.setting.SystemSettingService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -48,15 +49,17 @@ public class QrCodeController {
     private final FacilityService facilityService;
     private final AuditService auditService;
     private final PdfService pdfService;
+    private final SystemSettingService settingService;
 
     public QrCodeController(JdbcTemplate jdbcTemplate, AuthService authService,
                             FacilityService facilityService, AuditService auditService,
-                            PdfService pdfService) {
+                            PdfService pdfService, SystemSettingService settingService) {
         this.jdbcTemplate = jdbcTemplate;
         this.authService = authService;
         this.facilityService = facilityService;
         this.auditService = auditService;
         this.pdfService = pdfService;
+        this.settingService = settingService;
     }
 
     /** 标签 PDF：按筛选条件输出二维码介绍标签，每个二维码一张横向 A4。 */
@@ -292,9 +295,21 @@ public class QrCodeController {
         AuthenticatedUser user = requireAdmin(authentication);
         Map<String, Object> qr = findQr(id);
         if ("DELETED".equals(String.valueOf(qr.get("status")))) throw new IllegalArgumentException("二维码已经删除");
+        deleteBoundFacilityCascade(qr, user);
         softDelete(qr);
         auditService.record(user.getId(), "QRCODE_DELETE", "FACILITY_QR_CODE", String.valueOf(id), qrDetails(qr));
         return ApiResponse.success(Collections.singletonMap("deleted", true));
+    }
+
+    /**
+     * 删除已绑定的二维码时，同步级联删除其绑定的设施档案及巡检记录/照片/整改单等全部关联数据
+     * （与"重置为未绑定"同语义），避免留下无码绑定的孤儿设施继续出现在巡检状态等页面。
+     */
+    private void deleteBoundFacilityCascade(Map<String, Object> qr, AuthenticatedUser user) {
+        Object facilityId = qr.get("facility_id");
+        if (facilityId instanceof Number) {
+            facilityService.delete(((Number) facilityId).longValue(), user.getId(), user.getRoleCode(), true);
+        }
     }
 
     @PutMapping("/{id}/label")
@@ -316,6 +331,177 @@ public class QrCodeController {
                 "SELECT id,token,serial_no,school,campus,building,floor,location_no,location_label,status FROM facility_qr_code WHERE id=?", id));
     }
 
+    /** 修改二维码的位置与名称：可改校区/楼栋/楼层/自定义名称；楼层变更时在新区块内重新编号，码值与系统序号不变。 */
+    @PutMapping("/{id}/info")
+    @Transactional
+    public ApiResponse<Map<String, Object>> updateInfo(@PathVariable long id,
+                                                       @RequestBody InfoRequest request,
+                                                       Authentication authentication) {
+        AuthenticatedUser user = requireAdmin(authentication);
+        Map<String, Object> qr = findQr(id);
+        if ("DELETED".equals(String.valueOf(qr.get("status")))) throw new IllegalArgumentException("请先恢复已删除的二维码再修改");
+        String school = value(qr.get("school"));
+        String campus = request.campus == null ? "" : request.campus.trim();
+        String building = request.building == null ? "" : request.building.trim();
+        String floor = request.floor == null ? "" : request.floor.trim();
+        if (campus.isEmpty() || building.isEmpty() || floor.isEmpty()) throw new IllegalArgumentException("校区、楼栋和楼层必须填写完整");
+        String label = request.locationLabel == null ? "" : request.locationLabel.trim();
+        if (label.length() > 120) throw new IllegalArgumentException("二维码名称不能超过 120 个字符");
+        if (!label.isEmpty()) {
+            ensureLabelsAvailable(school, campus, building, floor, Collections.singletonList(label), id);
+        }
+        // 楼层不变时保留原位置号；换了校区/楼栋/楼层则在新区块内排到下一个位置号
+        boolean sameBlock = campus.equals(value(qr.get("campus"))) && building.equals(value(qr.get("building"))) && floor.equals(value(qr.get("floor")));
+        int locationNo;
+        if (sameBlock) {
+            locationNo = qr.get("location_no") == null ? 1 : ((Number) qr.get("location_no")).intValue();
+        } else {
+            Integer currentMax = jdbcTemplate.queryForObject(
+                    "SELECT COALESCE(MAX(location_no),0) FROM facility_qr_code WHERE school=? AND campus=? AND building=? AND floor=?",
+                    Integer.class, school, campus, building, floor);
+            locationNo = (currentMax == null ? 0 : currentMax) + 1;
+        }
+        jdbcTemplate.update("UPDATE facility_qr_code SET campus=?,building=?,floor=?,location_no=?,location_label=? WHERE id=?",
+                campus, building, floor, locationNo, label, id);
+        Map<String, Object> details = qrDetails(qr);
+        details.put("newCampus", campus);
+        details.put("newBuilding", building);
+        details.put("newFloor", floor);
+        details.put("newLocationLabel", label);
+        auditService.record(user.getId(), "QRCODE_INFO_UPDATE", "FACILITY_QR_CODE", String.valueOf(id), details);
+        return ApiResponse.success(jdbcTemplate.queryForMap(
+                "SELECT id,token,serial_no,school,campus,building,floor,location_no,location_label,status FROM facility_qr_code WHERE id=?", id));
+    }
+
+    public static class InfoRequest {
+        public String campus;
+        public String building;
+        public String floor;
+        public String locationLabel;
+    }
+
+    /** 码值导出：优先按勾选的 id 导出；未勾选时按当前筛选导出全部。CSV 带 UTF-8 BOM，Excel 直接打开不乱码。 */
+    @GetMapping("/export-tokens.csv")
+    public ResponseEntity<byte[]> exportTokens(@RequestParam(required = false) String status,
+                                               @RequestParam(required = false) String keyword,
+                                               @RequestParam(required = false) List<Long> ids,
+                                               Authentication authentication) {
+        AuthenticatedUser user = requireAdmin(authentication);
+        List<Map<String, Object>> rows;
+        if (ids != null && !ids.isEmpty()) {
+            String placeholders = String.join(",", Collections.nCopies(ids.size(), "?"));
+            Object[] args = new Object[ids.size()];
+            for (int i = 0; i < ids.size(); i++) args[i] = ids.get(i);
+            rows = jdbcTemplate.queryForList("SELECT q.serial_no,q.token,q.status,q.campus,q.building,q.floor,q.location_label,f.facility_no,f.name AS facility_name,q.created_at " +
+                    "FROM facility_qr_code q LEFT JOIN facility f ON f.id=q.facility_id " +
+                    "WHERE q.id IN (" + placeholders + ") AND q.status<>'DELETED' ORDER BY q.serial_no", args);
+        } else {
+            String like = keyword == null ? "" : "%" + keyword.trim() + "%";
+            String statusSql = status == null || status.trim().isEmpty() ? "q.status<>'DELETED'" : "q.status=?";
+            String sql = "SELECT q.serial_no,q.token,q.status,q.campus,q.building,q.floor,q.location_label,f.facility_no,f.name AS facility_name,q.created_at " +
+                    "FROM facility_qr_code q LEFT JOIN facility f ON f.id=q.facility_id " +
+                    "WHERE " + statusSql + " AND (?='' OR q.token LIKE ? OR f.facility_no LIKE ? OR f.name LIKE ? OR q.school LIKE ? OR q.campus LIKE ? OR q.building LIKE ? OR q.floor LIKE ? OR q.location_label LIKE ?) " +
+                    "ORDER BY q.serial_no";
+            List<Object> args = new ArrayList<>();
+            if (status != null && !status.trim().isEmpty()) args.add(status);
+            for (int i = 0; i < 9; i++) args.add(like);
+            rows = jdbcTemplate.queryForList(sql, args.toArray());
+        }
+        StringBuilder csv = new StringBuilder("\uFEFF序号,码值,状态,校区,楼栋,楼层,二维码名称,绑定设施编号,绑定设施名称,创建时间\n");
+        for (Map<String, Object> row : rows) {
+            String state = String.valueOf(row.get("status"));
+            String statusText = "UNCLAIMED".equals(state) ? "未绑定" : "BOUND".equals(state) ? "已绑定" : "已删除";
+            csv.append(csvCell(row.get("serial_no"))).append(',')
+                    .append(csvCell(row.get("token"))).append(',')
+                    .append(csvCell(statusText)).append(',')
+                    .append(csvCell(row.get("campus"))).append(',')
+                    .append(csvCell(row.get("building"))).append(',')
+                    .append(csvCell(row.get("floor"))).append(',')
+                    .append(csvCell(row.get("location_label"))).append(',')
+                    .append(csvCell(row.get("facility_no"))).append(',')
+                    .append(csvCell(row.get("facility_name"))).append(',')
+                    .append(csvCell(row.get("created_at"))).append('\n');
+        }
+        auditService.record(user.getId(), "QRCODE_TOKEN_EXPORT", "FACILITY_QR_CODE", "export-tokens",
+                Collections.singletonMap("count", rows.size()));
+        byte[] body = csv.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType("text/csv;charset=UTF-8"));
+        headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=qr-tokens-" + java.time.LocalDate.now() + ".csv");
+        return ResponseEntity.ok().headers(headers).body(body);
+    }
+
+    /** CSV 单元格转义：含逗号/引号/换行时加引号包裹，内部引号翻倍 */
+    private String csvCell(Object value) {
+        String text = value == null ? "" : String.valueOf(value);
+        if (text.contains(",") || text.contains("\"") || text.contains("\n") || text.contains("\r")) {
+            return '"' + text.replace("\"", "\"\"") + '"';
+        }
+        return text;
+    }
+
+    /**
+     * 码值导入：按码值批量添加二维码，用于备份码值的重新导入复用。
+     * 码值不存在则新建未绑定码；已删除的自动恢复为未绑定；已存在/已绑定的跳过，避免误覆盖。
+     */
+    @PostMapping("/import-tokens")
+    @Transactional
+    public ApiResponse<Map<String, Object>> importTokens(@Valid @RequestBody ImportTokensRequest request,
+                                                         Authentication authentication) {
+        AuthenticatedUser user = requireAdmin(authentication);
+        List<String> tokens = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        if (request.tokens != null) {
+            for (String raw : request.tokens) {
+                String token = raw == null ? "" : raw.trim();
+                // 与小程序解析规则一致：仅字母数字和连字符，长度 4~64；输入内部去重
+                if (token.isEmpty() || !token.matches("[A-Za-z0-9-]{4,64}") || !seen.add(token)) continue;
+                tokens.add(token);
+            }
+        }
+        if (tokens.isEmpty()) throw new IllegalArgumentException("请填写要导入的码值，每行一个（仅支持字母、数字和连字符，长度 4~64）");
+        if (tokens.size() > 500) throw new IllegalArgumentException("每次最多导入 500 个码值");
+        Integer base = jdbcTemplate.queryForObject("SELECT COALESCE(MAX(serial_no),0) FROM facility_qr_code", Integer.class);
+        int serial = base == null ? 0 : base;
+        int imported = 0, restored = 0, skipped = 0;
+        List<String> importedTokens = new ArrayList<>();
+        for (String token : tokens) {
+            List<Map<String, Object>> existing = jdbcTemplate.queryForList(
+                    "SELECT id,status FROM facility_qr_code WHERE token=?", token);
+            if (!existing.isEmpty()) {
+                String state = String.valueOf(existing.get(0).get("status"));
+                if ("DELETED".equals(state)) {
+                    jdbcTemplate.update("UPDATE facility_qr_code SET status='UNCLAIMED',deleted_at=NULL WHERE id=?",
+                            existing.get(0).get("id"));
+                    restored++;
+                } else {
+                    skipped++;
+                }
+                continue;
+            }
+            jdbcTemplate.update("INSERT INTO facility_qr_code(token,serial_no,school) VALUES(?,?,?)",
+                    token, ++serial, DEFAULT_SCHOOL);
+            imported++;
+            if (importedTokens.size() < 50) importedTokens.add(token);
+        }
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("imported", imported);
+        details.put("restored", restored);
+        details.put("skipped", skipped);
+        details.put("sampleTokens", importedTokens);
+        auditService.record(user.getId(), "QRCODE_TOKEN_IMPORT", "FACILITY_QR_CODE", "import-tokens", details);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("imported", imported);
+        result.put("restored", restored);
+        result.put("skipped", skipped);
+        return ApiResponse.success(result);
+    }
+
+    public static class ImportTokensRequest {
+        @Size(max = 500, message = "每次最多导入 500 个码值")
+        public java.util.List<String> tokens;
+    }
+
     @PostMapping("/batch-delete")
     @Transactional
     public ApiResponse<Map<String, Object>> batchDelete(@Valid @RequestBody BatchDeleteRequest request,
@@ -328,6 +514,7 @@ public class QrCodeController {
             if (id == null) continue;
             Map<String, Object> qr = findQr(id);
             if ("DELETED".equals(String.valueOf(qr.get("status")))) continue;
+            deleteBoundFacilityCascade(qr, user);
             softDelete(qr);
             deleted++;
         }
@@ -425,6 +612,8 @@ public class QrCodeController {
                 if (facility != null) {
                     result.put("type", "FACILITY");
                     result.put("facility", facility);
+                    // 告知小程序端本次扫码是否需要采集定位：关闭时保安可跳过“定位中”等待
+                    result.put("locationRequired", settingService.isLocationValidationEnabled());
                     return ApiResponse.success(result);
                 }
             }
@@ -437,6 +626,7 @@ public class QrCodeController {
         if (!legacy.isEmpty()) {
             result.put("type", "FACILITY");
             result.put("facility", facilityService.detail(((Number) legacy.get(0).get("id")).longValue()));
+            result.put("locationRequired", settingService.isLocationValidationEnabled());
             return ApiResponse.success(result);
         }
         result.put("type", "UNKNOWN");

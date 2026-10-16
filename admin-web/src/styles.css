@@ -321,3 +321,14 @@ tr.drag-over td { border-top: 2px solid #0f6cbd; }
 .qr-table td, .qr-table th { padding-left: 4px; padding-right: 4px; }
 
 .table-note { margin: 12px 4px 0; color: #616161; font-size: 12px; }
+
+/* 单个二维码预览弹窗 */
+.qr-view-body { display: flex; gap: 20px; align-items: center; margin: 8px 0 4px; flex-wrap: wrap; }
+.qr-view-image { border: 1px solid #e0e0e0; border-radius: 8px; background: #fff; flex-shrink: 0; }
+.qr-view-meta { font-size: 14px; line-height: 1.9; min-width: 0; }
+.qr-view-meta p { margin: 0 0 6px; }
+.qr-view-meta code { word-break: break-all; background: #f5f5f5; padding: 1px 5px; border-radius: 4px; }
+
+/* 扫码巡检定位校验开关卡片（巡检项配置页顶部） */
+.location-validation-card { margin-bottom: 16px; }
+.location-validation-card .panel-head p { max-width: 640px; }

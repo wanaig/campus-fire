@@ -51,12 +51,14 @@ function deviceId() {
 }
 
 function getLocation(options = {}) {
-  const { silent = false } = options
+  const { silent = false, highAccuracy = false } = options
   return new Promise((resolve, reject) => {
     wx.getLocation({
       type: 'gcj02',
-      isHighAccuracy: true,
-      highAccuracyExpireTime: 5000,
+      // 高精度模式会显著拉长单次定位耗时（最长等 5 秒），默认走系统快速定位；
+      // 仅在采集员采集设施坐标、稳定定位首轮采样时显式开启
+      isHighAccuracy: highAccuracy,
+      highAccuracyExpireTime: 3000,
       success: resolve,
       fail() {
         if (silent) {
@@ -84,14 +86,21 @@ function getLocation(options = {}) {
 }
 
 const STABLE_LOCATION_SAMPLES = 4
-const STABLE_LOCATION_INTERVAL_MS = 3500
+const STABLE_LOCATION_INTERVAL_MS = 800
 const STABLE_LOCATION_RADIUS_METERS = 300
+const STABLE_LOCATION_GOOD_ACCURACY_METERS = 65
 
 function locationDistanceMeters(a, b) {
   const latitude = (Number(a.latitude) + Number(b.latitude)) / 2
   const dLat = Number(a.latitude) - Number(b.latitude)
   const dLon = (Number(a.longitude) - Number(b.longitude)) * Math.cos(latitude * Math.PI / 180)
   return Math.sqrt(dLat * dLat + dLon * dLon) * 111000
+}
+
+function accuracyAsc(a, b) {
+  const accuracyA = Number.isFinite(Number(a.accuracy)) ? Number(a.accuracy) : Number.MAX_SAFE_INTEGER
+  const accuracyB = Number.isFinite(Number(b.accuracy)) ? Number(b.accuracy) : Number.MAX_SAFE_INTEGER
+  return accuracyA - accuracyB
 }
 
 function retryableLocationError(message, code) {
@@ -115,28 +124,34 @@ function selectStableLocation(samples) {
   if (stable.length < required) {
     throw retryableLocationError(`连续定位结果相差超过${STABLE_LOCATION_RADIUS_METERS}米，当前定位不稳定，请保持在设施附近后重新定位`, 'LOCATION_UNSTABLE')
   }
-  return stable.slice().sort((a, b) => {
-    const accuracyA = Number.isFinite(Number(a.accuracy)) ? Number(a.accuracy) : Number.MAX_SAFE_INTEGER
-    const accuracyB = Number.isFinite(Number(b.accuracy)) ? Number(b.accuracy) : Number.MAX_SAFE_INTEGER
-    return accuracyA - accuracyB
-  })[0]
+  return stable.slice().sort(accuracyAsc)[0]
+}
+
+/** 前 3 个有效样本相互吻合且最好精度合格时即可提前采信，不必等满 4 轮。 */
+function stableEnough(samples) {
+  const best = samples.slice().sort(accuracyAsc)[0]
+  if (Number.isFinite(Number(best.accuracy)) && Number(best.accuracy) > STABLE_LOCATION_GOOD_ACCURACY_METERS) {
+    return false
+  }
+  return samples.every(sample => locationDistanceMeters(best, sample) <= STABLE_LOCATION_RADIUS_METERS)
 }
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-/** 扫码巡检专用稳定定位：4 次采样约持续 10～20 秒。 */
+/** 扫码巡检稳定定位：仅首轮走高精度，其余走系统快速定位，多数 3～5 秒完成（原先约 10～20 秒）。 */
 async function getStableLocation(onProgress) {
   const samples = []
   for (let i = 0; i < STABLE_LOCATION_SAMPLES; i += 1) {
     if (typeof onProgress === 'function') onProgress(i + 1, STABLE_LOCATION_SAMPLES)
     try {
-      const location = await getLocation({ silent: true })
+      const location = await getLocation({ silent: true, highAccuracy: i === 0 })
       if (Number.isFinite(Number(location.latitude)) && Number.isFinite(Number(location.longitude))) {
         samples.push(location)
       }
     } catch (_) { /* 单次定位失败时继续采样，最终按有效次数统一提示 */ }
+    if (samples.length >= 3 && stableEnough(samples)) return selectStableLocation(samples)
     if (i < STABLE_LOCATION_SAMPLES - 1) await delay(STABLE_LOCATION_INTERVAL_MS)
   }
   return selectStableLocation(samples)
@@ -171,8 +186,11 @@ function uploadPhotoTo(url, filePath, latitude, longitude, accuracyMeters) {
       captureSource: 'CAMERA',
       clientCapturedAt: new Date().toISOString(),
       deviceId: deviceId(),
-      latitude: String(latitude),
-      longitude: String(longitude),
+    }
+    // 管理端关闭定位校验时允许无定位上传：坐标为空就整体省略，避免传 "null" 被后端拒收
+    if (latitude != null && longitude != null) {
+      formData.latitude = String(latitude)
+      formData.longitude = String(longitude)
     }
     if (accuracyMeters != null && Number.isFinite(Number(accuracyMeters))) formData.accuracyMeters = String(accuracyMeters)
     wx.uploadFile({

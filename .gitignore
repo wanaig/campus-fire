@@ -25,3 +25,8 @@ tmp/
 # Operating systems
 .DS_Store
 Thumbs.db
+
+# WorkBuddy agent workspace & local exports
+.workbuddy/
+*.tar.gz
+qr-tokens-*.csv

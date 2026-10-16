@@ -65,7 +65,24 @@ export const api = {
   updateQrLabel: (id, label) => request(`/qr-codes/${id}/label`, {
     method: 'PUT', body: JSON.stringify({ label }),
   }),
+  updateQrInfo: (id, info) => request(`/qr-codes/${id}/info`, {
+    method: 'PUT', body: JSON.stringify(info),
+  }),
   unbindQrCode: (id) => request(`/qr-codes/${id}/unbind`, { method: 'POST' }),
+  importQrTokens: (tokens) => request('/qr-codes/import-tokens', {
+    method: 'POST', body: JSON.stringify({ tokens }),
+  }),
+  downloadQrTokensCsv: (status = '', keyword = '', ids = []) => {
+    const params = []
+    if (ids.length) {
+      params.push(`ids=${ids.join(',')}`)
+    } else {
+      if (status) params.push(`status=${status}`)
+      if (keyword) params.push(`keyword=${encodeURIComponent(keyword)}`)
+    }
+    const qs = params.length ? `?${params.join('&')}` : ''
+    return openPdf(`/qr-codes/export-tokens.csv${qs}`, `qr-tokens-${new Date().toISOString().slice(0, 10)}.csv`)
+  },
   downloadQrLabelsPdf: (status = '', ids = [], keyword = '') => {
     const params = []
     if (status) params.push(`status=${status}`)
@@ -132,4 +149,8 @@ export const api = {
   reviewInspectionRisk: (id, status) => request(`/inspection-risks/${id}/review`, { method: 'POST', body: JSON.stringify({ status }) }),
   deleteInspectionRisk: (id) => request(`/inspection-risks/${id}`, { method: 'DELETE' }),
   auditLogs: (actionCode = '') => request(`/audit-logs${actionCode ? `?action=${encodeURIComponent(actionCode)}` : ''}`),
+  inspectionSettings: () => request('/settings/inspection'),
+  updateInspectionSettings: (locationValidation) => request('/settings/inspection', {
+    method: 'PUT', body: JSON.stringify({ locationValidation }),
+  }),
 }

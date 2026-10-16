@@ -30,36 +30,41 @@ function locationText(facility) {
   return [facility.campus, facility.building, facility.floor, facility.area, facility.detailLocation].filter(Boolean).join(' / ')
 }
 
-function navigateToInspect(facility, session) {
+function navigateToInspect(facility, session, options = {}) {
   const query = [
     `sessionId=${session.sessionId}`,
     `facilityType=${facility.facilityType || 'FIRE_HYDRANT'}`,
     `name=${encodeURIComponent(facility.name)}`,
     `no=${encodeURIComponent(facility.facilityNo)}`,
     `location=${encodeURIComponent(locationText(facility))}`,
+    `locationRequired=${options.locationRequired !== false}`,
   ].join('&')
   wx.navigateTo({ url: `/pages/inspect/inspect?${query}` })
 }
 
-/** 设施驱动巡检：扫码后直接对该设施开始巡检会话，无需提前生成任务；本人未完成的会话自动续检 */
-async function startSession(facility, qrToken) {
-  wx.showLoading({ title: '定位中 1/4', mask: true })
+/** 设施驱动巡检：扫码后直接对该设施开始巡检会话，无需提前生成任务；本人未完成的会话自动续检
+ *  options.locationRequired 为 false 时（管理端关闭了定位校验）跳过定位采样，直接开始巡检 */
+async function startSession(facility, qrToken, options = {}) {
+  const locationRequired = options.locationRequired !== false
+  if (locationRequired) {
+    wx.showLoading({ title: '定位中 1/4', mask: true })
+  } else {
+    wx.showLoading({ title: '正在开始巡检', mask: true })
+  }
   let session
   try {
-    const location = await getStableLocation((current, total) => {
-      wx.showLoading({ title: `定位中 ${current}/${total}`, mask: true })
-    })
-    wx.showLoading({ title: '正在校验位置', mask: true })
-    session = await request('/inspection/sessions', {
-      method: 'POST',
+    let data = { qrToken }
+    if (locationRequired) {
+      const location = await getStableLocation((current, total) => {
+        wx.showLoading({ title: `定位中 ${current}/${total}`, mask: true })
+      })
+      wx.showLoading({ title: '正在校验位置', mask: true })
       // 定位校验阈值由后端统一控制（默认100米），客户端不再放宽
-      data: {
-        qrToken,
-        latitude: location.latitude,
-        longitude: location.longitude,
-        accuracyMeters: location.accuracy,
-      },
-    })
+      data.latitude = location.latitude
+      data.longitude = location.longitude
+      data.accuracyMeters = location.accuracy
+    }
+    session = await request('/inspection/sessions', { method: 'POST', data })
   } catch (error) {
     if (error && /当前定位距离设施约/.test(error.message || '')) {
       error.code = 'LOCATION_TOO_FAR'
@@ -69,16 +74,17 @@ async function startSession(facility, qrToken) {
   } finally {
     wx.hideLoading()
   }
-  navigateToInspect(facility, session)
+  navigateToInspect(facility, session, options)
 }
 
-async function startSessionWithRetryContext(facility, qrToken) {
+async function startSessionWithRetryContext(facility, qrToken, options = {}) {
   try {
-    return await startSession(facility, qrToken)
+    return await startSession(facility, qrToken, options)
   } catch (error) {
     if (error && error.canRetryLocation) {
       error.retryFacility = facility
       error.retryQrToken = qrToken
+      error.retryOptions = options
     }
     throw error
   }
@@ -92,6 +98,7 @@ async function startByScan() {
   const token = await scanQrToken()
   wx.showLoading({ title: '正在识别二维码', mask: true })
   let facility
+  let locationRequired = true
   try {
     const result = await resolveToken(token)
     if (result.type === 'BLANK') {
@@ -101,10 +108,12 @@ async function startByScan() {
       throw new Error(result.message || '二维码无效，请扫描张贴在设施上的巡检二维码')
     }
     facility = result.facility
+    // 管理端可关闭扫码定位校验：关闭时小程序端跳过定位采样，避免长时间等待
+    locationRequired = result.locationRequired !== false
   } finally {
     wx.hideLoading()
   }
-  await startSessionWithRetryContext(facility, token)
+  await startSessionWithRetryContext(facility, token, { locationRequired })
   return true
 }
 
@@ -112,7 +121,7 @@ async function retryLocation(error) {
   if (!error || !error.retryFacility || !error.retryQrToken) {
     throw new Error('本次扫码信息已失效，请重新扫描设施二维码')
   }
-  return startSessionWithRetryContext(error.retryFacility, error.retryQrToken)
+  return startSessionWithRetryContext(error.retryFacility, error.retryQrToken, error.retryOptions || {})
 }
 
 function scanRawCode() {

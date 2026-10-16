@@ -4,6 +4,7 @@ import com.campusfire.auth.AuthService;
 import com.campusfire.auth.AuthenticatedUser;
 import com.campusfire.common.api.ApiResponse;
 import com.campusfire.audit.AuditService;
+import com.campusfire.common.setting.SystemSettingService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -29,8 +30,8 @@ import java.util.*;
 @RestController
 @RequestMapping("/inspection")
 public class InspectionSessionController {
-    private final JdbcTemplate jdbcTemplate; private final AuthService authService; private final ObjectMapper objectMapper; private final AuditService auditService; private final InspectionResultSupport resultSupport;
-    public InspectionSessionController(JdbcTemplate jdbcTemplate, AuthService authService,ObjectMapper objectMapper, AuditService auditService, InspectionResultSupport resultSupport){this.jdbcTemplate=jdbcTemplate;this.authService=authService;this.objectMapper=objectMapper;this.auditService=auditService;this.resultSupport=resultSupport;}
+    private final JdbcTemplate jdbcTemplate; private final AuthService authService; private final ObjectMapper objectMapper; private final AuditService auditService; private final InspectionResultSupport resultSupport; private final SystemSettingService settingService;
+    public InspectionSessionController(JdbcTemplate jdbcTemplate, AuthService authService,ObjectMapper objectMapper, AuditService auditService, InspectionResultSupport resultSupport, SystemSettingService settingService){this.jdbcTemplate=jdbcTemplate;this.authService=authService;this.objectMapper=objectMapper;this.auditService=auditService;this.resultSupport=resultSupport;this.settingService=settingService;}
 
     /** 扫码开始巡检：按二维码定位设施，任何保安均可随时发起，同一设施本人未完成的会话可直接续检 */
     @PostMapping("/sessions")
@@ -38,10 +39,15 @@ public class InspectionSessionController {
         Map<String,Object> facility=resolveFacilityByQr(r.qrToken);
         if(facility==null)throw new IllegalArgumentException("二维码无效或不属于任何设施");
         if(!"IN_USE".equals(String.valueOf(facility.get("lifecycle_status"))))throw new IllegalArgumentException("该设施已停用或报废，不能巡检");
-        LocationProximity.validateCoordinates(r.latitude,r.longitude);
-        Double distance=facility.get("latitude")==null||facility.get("longitude")==null?null:LocationProximity.distanceMeters((Number)facility.get("latitude"),(Number)facility.get("longitude"),r.latitude,r.longitude);
-        double allowedDistance=LocationProximity.allowedDistanceMeters((Number)facility.get("location_accuracy_meters"),r.accuracyMeters);
-        if(distance!=null&&distance>allowedDistance)throw new IllegalArgumentException(String.format("当前定位距离设施约%d米（本次允许%d米），请靠近设施后重试",Math.round(distance),Math.round(allowedDistance)));
+        // 管理端定位校验开关：关闭时跳过坐标合法性校验与距离校验（GPS漂移误伤时的逃生通道）
+        boolean locationValidation=settingService.isLocationValidationEnabled();
+        Double distance=null;
+        if(locationValidation){
+            LocationProximity.validateCoordinates(r.latitude,r.longitude);
+            distance=facility.get("latitude")==null||facility.get("longitude")==null?null:LocationProximity.distanceMeters((Number)facility.get("latitude"),(Number)facility.get("longitude"),r.latitude,r.longitude);
+            double allowedDistance=LocationProximity.allowedDistanceMeters((Number)facility.get("location_accuracy_meters"),r.accuracyMeters);
+            if(distance!=null&&distance>allowedDistance)throw new IllegalArgumentException(String.format("当前定位距离设施约%d米（本次允许%d米），请靠近设施后重试",Math.round(distance),Math.round(allowedDistance)));
+        }
         Long facilityId=((Number)facility.get("id")).longValue();
         jdbcTemplate.update("UPDATE inspection_session SET status='CANCELLED' WHERE facility_id=? AND user_id=? AND status='STARTED' AND started_at<NOW()-INTERVAL 2 HOUR",facilityId,u.getId());
         List<Map<String,Object>> resumed=jdbcTemplate.queryForList("SELECT id,started_at FROM inspection_session WHERE facility_id=? AND user_id=? AND status='STARTED' ORDER BY started_at DESC LIMIT 1",facilityId,u.getId());
@@ -251,7 +257,7 @@ public class InspectionSessionController {
         if(!"GUARD".equals(u.getRoleCode()))throw new AccessDeniedException("仅保安账号可以执行巡检操作");
         return u;
     }
-    public static class StartRequest{@NotBlank public String qrToken;@NotNull public BigDecimal latitude;@NotNull public BigDecimal longitude;public BigDecimal accuracyMeters;}
+    public static class StartRequest{@NotBlank public String qrToken;public BigDecimal latitude;public BigDecimal longitude;public BigDecimal accuracyMeters;}
     public static class DraftRequest{@NotNull public Map<String,String> results;public String note;}
     public static class SessionResponse{public String sessionId;public Long facilityId;public Instant serverStartedAt;public BigDecimal latitude;public BigDecimal longitude;SessionResponse(String s,Long f,Instant i,BigDecimal lat,BigDecimal lon){sessionId=s;facilityId=f;serverStartedAt=i;latitude=lat;longitude=lon;}}
     public static class SubmitResponse{public String recordId;public String sessionId;public Long facilityId;public Integer photoCount;public Instant submittedAt;SubmitResponse(String r,String s,Long f,Integer p,Instant i){recordId=r;sessionId=s;facilityId=f;photoCount=p;submittedAt=i;}}

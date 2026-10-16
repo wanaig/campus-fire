@@ -59,6 +59,18 @@ public class FacilityRepository {
                 "WHERE token=? AND status='UNCLAIMED'", facilityId, token);
     }
 
+    /** 建档绑定时回填二维码的分级位置：仅补齐码上为空的字段，管理端已配置的位置/名称保持不变。 */
+    public int backfillQrLocation(String token, String campus, String building, String floor, String locationLabel) {
+        return jdbcTemplate.update(
+                "UPDATE facility_qr_code SET " +
+                        "campus=CASE WHEN campus IS NULL OR campus='' THEN ? ELSE campus END, " +
+                        "building=CASE WHEN building IS NULL OR building='' THEN ? ELSE building END, " +
+                        "floor=CASE WHEN floor IS NULL OR floor='' THEN ? ELSE floor END, " +
+                        "location_label=CASE WHEN location_label IS NULL OR location_label='' THEN ? ELSE location_label END " +
+                        "WHERE token=?",
+                campus, building, floor, locationLabel, token);
+    }
+
     public int revokeQrBinding(long facilityId) {
         return jdbcTemplate.update("UPDATE facility_qr_code SET status='UNCLAIMED',facility_id=NULL,bound_at=NULL WHERE facility_id=?", facilityId);
     }

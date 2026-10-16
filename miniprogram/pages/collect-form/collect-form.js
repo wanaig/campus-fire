@@ -269,7 +269,8 @@ Page({
   },
   async captureLocation() {
     try {
-      const location = await getLocation()
+      // 设施坐标是后续巡检距离校验的锚点，这里必须用高精度定位
+      const location = await getLocation({ highAccuracy: true })
       this.setData({
         'form.latitude': String(location.latitude),
         'form.longitude': String(location.longitude),
